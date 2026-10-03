@@ -5,6 +5,16 @@ their name contains `scrcpy`.**
 
 # scrcpy (v4.1)
 
+## DroidCast Desktop (fork development)
+
+This fork includes **DroidCast Desktop**, a native Qt/C++ workspace with a bundled
+mirroring engine, ADB and Android server. Connect, pair, mirror, record, take
+screenshots and install APKs without configuring executable paths.
+See [desktop build and usage instructions](desktop/README.md). Platform installers
+and video embedded in the workspace are still under development.
+
+---
+
 <img src="app/data/scrcpy.svg" width="128" height="128" alt="scrcpy" align="right" />
 
 _pronounced "**scr**een **c**o**py**"_
