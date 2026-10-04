@@ -364,8 +364,9 @@ QWidget *Window::sessionPage() {
   preview->addLayout(phoneControls);
   preview->addWidget(label("Mirror window", "section"));
   preview->addWidget(
-      label("These controls affect the computer window, not Android. Pausing "
-            "the image does not pause audio or recording.",
+      label("Window presentation controls. In resizable virtual-display mode, "
+            "resizing also changes Android's display. Pausing the image does "
+            "not pause audio or recording.",
             "muted"));
   auto *windowControls = new QGridLayout;
   windowControls->setSpacing(8);
@@ -653,7 +654,7 @@ QWidget *Window::settingsPage() {
   categoryPicker->setAccessibleName("Configuration category");
   categoryPicker->addItems({"All settings", "Video", "Audio", "Device",
                             "Window", "Keyboard", "Mouse", "Gamepad",
-                            "Recording"});
+                            "Recording", "Virtual display"});
   layout->addWidget(categoryPicker);
   auto *routes = new QHBoxLayout;
   auto *connectionRoute = button("Connection settings", "wifi");
@@ -748,7 +749,7 @@ QWidget *Window::settingsPage() {
   for (const auto &category :
        {QString("Video"), QString("Audio"), QString("Device"),
         QString("Window"), QString("Keyboard"), QString("Mouse"),
-        QString("Gamepad"), QString("Recording")}) {
+        QString("Gamepad"), QString("Recording"), QString("Virtual display")}) {
     auto *group = new QGroupBox(category + " · advanced");
     auto *fields = new QFormLayout(group);
     fields->setSpacing(12);
@@ -759,6 +760,8 @@ QWidget *Window::settingsPage() {
       terms += " " + option.key + " " + option.title + " " + option.help;
       if (option.key == "key-injection")
         terms += " --prefer-text --raw-key-events";
+      if (option.key == "virtual-display")
+        terms += " --new-display";
       const auto current = normalizedOption(
           option, engine.preferences.options.value(option.key));
       QWidget *control;
@@ -783,7 +786,7 @@ QWidget *Window::settingsPage() {
           const auto error = textOptionError(key, edit->text().trimmed());
           validation->setText(error.isEmpty() ? QString{}
                                               : "Invalid value: " + error);
-          validation->setVisible(!error.isEmpty());
+          validation->setVisible(edit->isEnabled() && !error.isEmpty());
           edit->setAccessibleDescription(error);
         };
         validate();
@@ -815,11 +818,17 @@ QWidget *Window::settingsPage() {
         control = spin;
       }
       control->setObjectName("option-" + option.key);
-      control->setToolTip(option.help +
-                          (option.key == "key-injection"
-                               ? "\n--prefer-text / --raw-key-events"
-                               : "\n--" + option.key));
-      field(fields, option.title, control);
+      control->setToolTip(
+          option.help +
+          (option.key == "key-injection" ? "\n--prefer-text / --raw-key-events"
+           : option.key == "virtual-display" ? "\n--new-display"
+                                             : "\n--" + option.key));
+      if (qobject_cast<QCheckBox *>(control)) {
+        control->setAccessibleName(option.title);
+        fields->addRow(control);
+      } else {
+        field(fields, option.title, control);
+      }
       if (validation)
         fields->addRow(validation);
       fields->addRow(label(option.help, "muted"));
@@ -936,8 +945,18 @@ QWidget *Window::diagnosticsPage() {
 void Window::savePreferences() {
   engine.preferences.save(settings);
   for (const auto &option : sessionOptions())
-    if (auto *control = findChild<QWidget *>("option-" + option.key))
-      control->setEnabled(sessionOptionAvailable(option, engine.preferences));
+    if (auto *control = findChild<QWidget *>("option-" + option.key)) {
+      const bool available = sessionOptionAvailable(option, engine.preferences);
+      const bool changed = control->isEnabled() != available;
+      control->setEnabled(available);
+      if (!available)
+        if (auto *error = findChild<QLabel *>("error-" + option.key))
+          error->hide();
+      if (changed && available)
+        if (auto *edit = qobject_cast<QLineEdit *>(control))
+          QMetaObject::invokeMethod(edit, "editingFinished",
+                                    Qt::DirectConnection);
+    }
   for (auto *check : findChildren<QCheckBox *>()) {
     const auto key = check->property("preference").toString();
     if (key.isEmpty())
@@ -988,6 +1007,8 @@ void Window::updateDevices() {
       actions->addWidget(choose);
       actions->addStretch();
       auto *capture = button("Screenshot", "capture");
+      capture->setProperty("captureSerial", d.serial);
+      capture->setProperty("captureReady", d.ready());
       capture->setEnabled(d.ready());
       actions->addWidget(capture);
       content->addLayout(actions);
@@ -1032,20 +1053,27 @@ void Window::updateActions() {
   for (const auto &d : engine.devices)
     if (d.serial == engine.activeSerial && d.ready())
       activeReady = true;
-  screenshotButton->setEnabled((running ? activeReady : ready) &&
-                               !engine.deviceBusy());
-  apkButton->setEnabled(screenshotButton->isEnabled() &&
-                        engine.controlAllowed());
+  const bool deviceAvailable =
+      (running ? activeReady : ready) && !engine.deviceBusy();
+  screenshotButton->setEnabled(
+      deviceAvailable &&
+      engine.captureAllowed(running ? engine.activeSerial : selectedSerial()));
+  apkButton->setEnabled(deviceAvailable && engine.controlAllowed());
   for (auto *control : findChildren<QPushButton *>())
     if (control->property("phoneControl").toBool())
       control->setEnabled(screenshotButton->isEnabled() &&
-                          engine.controlAllowed());
+                          engine.controlAllowed() &&
+                          !engine.usesAlternateDisplay());
     else if (control->property("windowControl").toBool())
       control->setEnabled(engine.windowControlsAvailable());
     else if (control->property("inspectDevice").toBool())
       control->setEnabled(ready && !running && !engine.deviceBusy());
     else if (control->property("cancelInspection").toBool())
       control->setEnabled(engine.inspecting());
+    else if (control->property("captureSerial").isValid())
+      control->setEnabled(
+          control->property("captureReady").toBool() && !engine.deviceBusy() &&
+          engine.captureAllowed(control->property("captureSerial").toString()));
   if (state == "unauthorized")
     deviceHelp->setText("Unlock your phone and accept the USB debugging "
                         "prompt. Devices refresh automatically.");
@@ -1070,8 +1098,15 @@ void Window::updateActions() {
   sessionDetail->setText(
       running
           ? engine.sessionStateText() + " · " + engine.activeSerial +
-                "\n\nYour live display opens in a separate DroidCast window. "
-                "Use the controls here for screenshots and applications." +
+                "\n\nYour live display opens in a separate DroidCast window. " +
+                (engine.usesAlternateDisplay()
+                     ? "Secondary/virtual display: use input inside the "
+                       "mirror. Phone-toolbar commands and screenshots are "
+                       "unavailable for this display; recording remains "
+                       "available. A virtual display without a launcher may "
+                       "need a Start Android package setting to show content."
+                     : "Use the controls here for screenshots and "
+                       "applications.") +
                 (engine.activeRecording.isEmpty()
                      ? QString{}
                      : "\n\nRecording to " +
@@ -1087,24 +1122,25 @@ bool Window::ensureCaptureDirectory() {
   return false;
 }
 void Window::launch(bool record) {
-  for (const auto &option : sessionOptions()) {
-    const auto error = textOptionError(
-        option.key,
-        normalizedOption(option, engine.preferences.options.value(option.key))
-            .toString());
-    if (!error.isEmpty()) {
+  const auto issue = sessionIssue(engine.preferences, record);
+  if (!issue.message.isEmpty()) {
+    for (const auto &option : sessionOptions()) {
+      if (option.key != issue.key)
+        continue;
       findChild<QLineEdit *>("settingsSearch")->clear();
       findChild<QComboBox *>("settingsCategory")
           ->setCurrentText(option.category);
       showPage(5);
-      if (auto *edit = findChild<QLineEdit *>("option-" + option.key)) {
-        edit->setFocus();
-        QMetaObject::invokeMethod(edit, "editingFinished",
-                                  Qt::DirectConnection);
+      if (auto *control = findChild<QWidget *>("option-" + option.key)) {
+        control->setFocus();
+        if (auto *edit = qobject_cast<QLineEdit *>(control))
+          QMetaObject::invokeMethod(edit, "editingFinished",
+                                    Qt::DirectConnection);
       }
-      notice->setText(option.title + ": " + error);
-      return;
+      break;
     }
+    notice->setText(issue.message);
+    return;
   }
   const auto serial = selectedSerial();
   if (serial.isEmpty())

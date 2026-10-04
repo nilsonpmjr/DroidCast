@@ -107,3 +107,26 @@ This advances ticket 16. Reset-video and other live Android actions remain plann
 
 This advances ticket 17. Camera, virtual display, encoder-specific codec options
 and automatic capability-driven selectors remain future slices.
+
+## Part 6: virtual-display sessions
+
+- Added a Virtual display settings category: explicit creation toggle, optional
+  resolution/density, flexible resizing, exact-package launch, on-screen keyboard
+  placement, system decorations, and move-apps-to-primary behavior on close.
+- Empty size uses engine defaults; density-only and resolution/density forms are
+  validated. No virtual display is created just by changing preferences.
+- Inactive values are retained but omitted from launch arguments. Read-only mode
+  disables flexible resizing and app launch; it does not suppress an explicitly
+  requested virtual display. Exact package names exclude search/force-stop modes.
+- Centralized launch validation used by both UI and engine. Conflicting physical
+  display IDs and flexible-display/crop combinations fail with actionable feedback.
+- Added launch-time alternate-display guards. Existing ADB phone buttons and
+  screenshots cannot target the active secondary/virtual session's primary screen
+  accidentally; their UI controls are disabled as well. Mirror input and recording
+  remain available. Changing next-session settings cannot weaken the active guard.
+- Kept the approved palette, clarified dependent controls and removed duplicated
+  toggle labels from advanced settings. Added a minimum-window-size layout test.
+- Verification covers arguments, invalid input, persistence, inactive settings,
+  read-only compatibility, targeting guards and UI dependencies. Full desktop tests
+  pass on Linux. Android 10+ virtual-display creation, app behavior and recording
+  on hardware still need verification; this does not close ticket 20's release gate.

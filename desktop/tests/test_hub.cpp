@@ -10,7 +10,10 @@
 #include <QListWidget>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScrollArea>
+#include <QScrollBar>
 #include <QSignalSpy>
+#include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QtTest>
 
@@ -44,6 +47,133 @@ private slots:
     applyTheme(*qobject_cast<QApplication *>(QCoreApplication::instance()));
   }
   void init() { qunsetenv("HUB_TEST_MODE"); }
+  void virtualDisplayArgumentsAndValidation() {
+    Preferences prefs;
+    prefs.options = {{"new-display", "1920x1080/240"},
+                     {"start-app", "com.android.settings"},
+                     {"no-vd-system-decorations", true},
+                     {"no-vd-destroy-content", true},
+                     {"display-ime-policy", "local"},
+                     {"flex-display", true}};
+    auto args = mirrorArguments("PHONE123", prefs);
+    QVERIFY(!args.join(' ').contains("new-display"));
+    QVERIFY(!args.join(' ').contains("start-app"));
+    QVERIFY(!args.join(' ').contains("display-ime-policy"));
+    QVERIFY(!args.contains("--flex-display"));
+    prefs.options["virtual-display"] = true;
+    args = mirrorArguments("PHONE123", prefs);
+    for (const auto flag :
+         {"--new-display=1920x1080/240", "--start-app=com.android.settings",
+          "--no-vd-system-decorations", "--no-vd-destroy-content",
+          "--display-ime-policy=local", "--flex-display"})
+      QVERIFY(args.contains(flag));
+    QVERIFY(!args.contains("--virtual-display"));
+    QVERIFY(sessionIssue(prefs).message.isEmpty());
+    prefs.options["new-display"] = "";
+    QVERIFY(mirrorArguments("PHONE123", prefs).contains("--new-display"));
+    for (const auto valid : {"", "1920x1080", "1920x1080/240", "/320"})
+      QVERIFY(textOptionError("new-display", valid).isEmpty());
+    for (const auto invalid :
+         {"0x1080", "1920x0", "1920x1080/0", "1920", "/", "65536x1080",
+          "1920x1080/240/2", "1920x1080;exit"})
+      QVERIFY(!textOptionError("new-display", invalid).isEmpty());
+    for (const auto invalid : {"+com.android.settings", "?settings",
+                               "com.android.settings --bad", "com..app"})
+      QVERIFY(!textOptionError("start-app", invalid).isEmpty());
+    prefs.options["display-id"] = 1;
+    QCOMPARE(sessionIssue(prefs).key, QString("display-id"));
+    prefs.options["display-id"] = 0;
+    prefs.options["crop"] = "720:1280:0:0";
+    QCOMPARE(sessionIssue(prefs).key, QString("crop"));
+    prefs.options["no-control"] = true;
+    QVERIFY(sessionIssue(prefs).message.isEmpty());
+    args = mirrorArguments("PHONE123", prefs);
+    QVERIFY(!args.contains("--flex-display"));
+    QVERIFY(!args.join(' ').contains("start-app"));
+    QVERIFY(args.contains("--new-display"));
+    prefs.options["virtual-display"] = false;
+    prefs.options["new-display"] = "invalid but inactive";
+    QVERIFY(sessionIssue(prefs).message.isEmpty());
+    prefs.options["display-id"] = 1;
+    QVERIFY(mirrorArguments("PHONE123", prefs)
+                .contains("--display-ime-policy=local"));
+    QSettings settings(storage.filePath("virtual.ini"), QSettings::IniFormat);
+    prefs.save(settings);
+    QCOMPARE(
+        Preferences::load(settings).options.value("new-display").toString(),
+        QString("invalid but inactive"));
+  }
+  void alternateDisplayGuardsStayPinnedToTheSession() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.options = {{"virtual-display", true}, {"display-id", 1}};
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"},
+                      {"OTHER", "device", "Other", "USB"}};
+    QSignalSpy messages(&engine, &Engine::message);
+    QVERIFY(!engine.start("PHONE123"));
+    QVERIFY(messages.last().first().toString().contains("existing display ID"));
+    engine.preferences.options["display-id"] = 0;
+    QVERIFY(engine.start("PHONE123"));
+    QVERIFY(engine.usesAlternateDisplay());
+    engine.preferences.options["virtual-display"] = false;
+    QVERIFY(engine.usesAlternateDisplay());
+    engine.phoneAction("PHONE123", Engine::PhoneAction::Home);
+    QVERIFY(!engine.deviceBusy());
+    QVERIFY(messages.last().first().toString().contains("no command was sent"));
+    const auto capture = storage.filePath("wrong-display.png");
+    engine.capture("PHONE123", capture);
+    QVERIFY(!engine.deviceBusy());
+    QVERIFY(!QFileInfo::exists(capture));
+    QVERIFY(messages.last().first().toString().contains(
+        "primary display was not captured"));
+    QVERIFY(engine.captureAllowed("OTHER"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+    QVERIFY(!engine.usesAlternateDisplay());
+    QVERIFY(engine.captureAllowed("PHONE123"));
+    engine.preferences.options["display-id"] = 2;
+    QVERIFY(engine.start("PHONE123"));
+    QVERIFY(engine.usesAlternateDisplay());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+  }
+  void virtualDisplayControlsRespectDependencies() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(5);
+    auto *category = window.findChild<QComboBox *>("settingsCategory");
+    QVERIFY(category->findText("Virtual display") >= 0);
+    category->setCurrentText("Virtual display");
+    auto *enabled = window.findChild<QCheckBox *>("option-virtual-display");
+    auto *size = window.findChild<QLineEdit *>("option-new-display");
+    auto *app = window.findChild<QLineEdit *>("option-start-app");
+    auto *flex = window.findChild<QCheckBox *>("option-flex-display");
+    QVERIFY(enabled && size && app && flex);
+    QVERIFY(!size->isEnabled());
+    enabled->setChecked(true);
+    QVERIFY(size->isEnabled());
+    QVERIFY(app->isEnabled());
+    QVERIFY(flex->isEnabled());
+    size->setText("invalid");
+    QMetaObject::invokeMethod(size, "editingFinished", Qt::DirectConnection);
+    QVERIFY(!window.findChild<QLabel *>("error-new-display")->isHidden());
+    enabled->setChecked(false);
+    QVERIFY(window.findChild<QLabel *>("error-new-display")->isHidden());
+    enabled->setChecked(true);
+    QVERIFY(!window.findChild<QLabel *>("error-new-display")->isHidden());
+    window.findChild<QCheckBox *>("option-no-control")->setChecked(true);
+    QVERIFY(!app->isEnabled());
+    QVERIFY(!flex->isEnabled());
+    QVERIFY(size->isEnabled());
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    bundledPreferences().save(settings);
+  }
   void advancedVideoValidationAndArguments() {
     Preferences prefs;
     prefs.options = {{"crop", "1080:1920:0:10"},

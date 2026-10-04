@@ -29,7 +29,9 @@ their normal stdin behavior. The desktop generates a new token per launch.
 | `L` / `R` | Rotate the displayed image left / right |
 | `P` / `U` | Pause / resume the displayed image |
 
-These commands do not mutate Android and are allowed in read-only mode. Pause
+Ordinary window commands do not mutate Android and are allowed in read-only mode.
+With `--flex-display`, resizing propagates to the Android virtual display;
+DroidCast disables that mode when read-only is selected. Pause
 does not pause the phone, audio, or recording. Resize is rejected in fullscreen
 or maximized mode. A handled response acknowledges dispatch, not a guarantee that
 the window manager honored the requested geometry/fullscreen state. The desktop

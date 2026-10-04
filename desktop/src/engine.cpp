@@ -12,6 +12,61 @@
 
 const QList<SessionOption> &sessionOptions() {
   static const QList<SessionOption> options{
+      {"virtual-display",
+       "Virtual display",
+       "Create a virtual display",
+       "Android 10+. Creates a separate display on the phone when you start a "
+       "session, including in read-only mode. It is removed on exit.",
+       false,
+       {}},
+      {"new-display",
+       "Virtual display",
+       "Resolution and density",
+       "Optional WIDTHxHEIGHT/DPI, for example 1920x1080/240. Empty uses phone "
+       "defaults, or 1280x960/160 with flexible sizing. /240 changes density "
+       "only. The video resolution limit still applies. Requires "
+       "virtual-display mode.",
+       QString(""),
+       {}},
+      {"flex-display",
+       "Virtual display",
+       "Resize Android with the window",
+       "Continuously resize the virtual display. Requires control enabled and "
+       "no capture crop. Only active in virtual-display mode.",
+       false,
+       {}},
+      {"start-app",
+       "Virtual display",
+       "Start Android package",
+       "Optional exact package, for example com.android.settings. Some phones "
+       "have no launcher on virtual displays; starting an app provides "
+       "content. Inactive outside virtual-display mode or in read-only mode; "
+       "no force-stop is performed.",
+       QString(""),
+       {}},
+      {"display-ime-policy",
+       "Virtual display",
+       "On-screen keyboard location",
+       "Android 10+, secondary or virtual display only. Default leaves policy "
+       "to the engine; local shows the keyboard there, fallback uses the "
+       "primary display, hide suppresses it.",
+       "default",
+       {"default", "local", "fallback", "hide"}},
+      {"no-vd-destroy-content",
+       "Virtual display",
+       "Move apps to the primary display on close",
+       "With virtual-display mode enabled, move running apps to the primary "
+       "display instead of destroying them when the virtual display closes.",
+       false,
+       {}},
+      {"no-vd-system-decorations",
+       "Virtual display",
+       "Hide virtual-display system decorations",
+       "May remove the launcher. Without a started app, the display may stay "
+       "empty and produce no video frames. Only active in virtual-display "
+       "mode.",
+       false,
+       {}},
       {"crop",
        "Video",
        "Capture crop",
@@ -193,6 +248,16 @@ const QList<SessionOption> &sessionOptions() {
 
 bool sessionOptionAvailable(const SessionOption &option, const Preferences &p) {
   const bool readOnly = p.options.value("no-control", false).toBool();
+  const bool virtualDisplay =
+      p.options.value("virtual-display", false).toBool();
+  if (option.key == "virtual-display")
+    return true;
+  if (option.key == "display-ime-policy")
+    return virtualDisplay || p.options.value("display-id", 0).toInt() > 0;
+  if (option.category == "Virtual display")
+    return virtualDisplay &&
+           (!(option.key == "flex-display" || option.key == "start-app") ||
+            !readOnly);
   if (option.category == "Keyboard")
     return !readOnly && p.keyboard == "sdk";
   if (option.category == "Mouse")
@@ -226,7 +291,26 @@ QVariant normalizedOption(const SessionOption &option, const QVariant &value) {
 QString textOptionError(const QString &key, const QString &value) {
   if (value.isEmpty())
     return {};
-  if (key == "crop") {
+  if (key == "new-display") {
+    static const QRegularExpression pattern(
+        "\\A(?:([0-9]{1,5})x([0-9]{1,5}))?(?:/([0-9]{1,5}))?\\z");
+    const auto match = pattern.match(value);
+    bool valid = match.hasMatch();
+    for (int i = 1; valid && i <= 3; ++i)
+      if (!match.captured(i).isEmpty())
+        valid =
+            match.captured(i).toInt() > 0 && match.captured(i).toInt() <= 65535;
+    if (!valid)
+      return "Use WIDTHxHEIGHT, WIDTHxHEIGHT/DPI, /DPI, or leave empty. Each "
+             "number must be 1–65535; device limits may be lower.";
+  } else if (key == "start-app") {
+    static const QRegularExpression pattern(
+        "\\A[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*\\z");
+    if (value.size() > 256 || !pattern.match(value).hasMatch())
+      return "Enter an exact Android package name such as "
+             "com.android.settings, without spaces, search prefixes or "
+             "force-stop prefixes.";
+  } else if (key == "crop") {
     const auto parts = value.split(':');
     bool valid = parts.size() == 4;
     for (int i = 0; valid && i < parts.size(); ++i) {
@@ -246,6 +330,35 @@ QString textOptionError(const QString &key, const QString &value) {
                   .hasMatch())
     return "Use an encoder name from the phone report (letters, numbers, dots, "
            "underscores or hyphens), or leave empty.";
+  return {};
+}
+
+PreferenceIssue sessionIssue(const Preferences &p, bool recording) {
+  for (const auto &option : sessionOptions()) {
+    if (!sessionOptionAvailable(option, p))
+      continue;
+    const auto error = textOptionError(
+        option.key,
+        normalizedOption(option, p.options.value(option.key)).toString());
+    if (!error.isEmpty())
+      return {option.key, option.title + ": " + error};
+  }
+  const bool virtualDisplay =
+      p.options.value("virtual-display", false).toBool();
+  if (virtualDisplay && p.options.value("display-id", 0).toInt() != 0)
+    return {"display-id",
+            "A new virtual display cannot use an existing display ID. Set "
+            "Android display ID to 0 or disable virtual-display mode."};
+  if (virtualDisplay && p.options.value("flex-display", false).toBool() &&
+      !p.options.value("no-control", false).toBool() &&
+      !p.options.value("crop").toString().trimmed().isEmpty())
+    return {"crop",
+            "Resizable virtual displays cannot use a capture crop. Clear "
+            "Capture crop or disable Resize Android with the window."};
+  if (recording && recordingFormat(p) == "mp4" && p.audio &&
+      p.options.value("audio-codec").toString() == "raw")
+    return {"audio-codec", "MP4 cannot contain raw audio. Choose MKV, another "
+                           "audio codec, or disable audio forwarding."};
   return {};
 }
 
@@ -350,6 +463,14 @@ QStringList mirrorArguments(const QString &serial, const Preferences &p,
       continue;
     if (!sessionOptionAvailable(option, p))
       continue;
+    if (option.key == "virtual-display")
+      continue;
+    if (option.key == "new-display") {
+      args << (value.toString().isEmpty()
+                   ? "--new-display"
+                   : "--new-display=" + value.toString());
+      continue;
+    }
     if (option.key == "record-format") {
       if (!recording.isEmpty())
         args << "--record-format=" + recordingFormat(p);
@@ -773,21 +894,9 @@ bool Engine::start(const QString &serial, const QString &recording) {
         "Wait for device inspection to finish or cancel it before mirroring.");
     return false;
   }
-  for (const auto &option : sessionOptions()) {
-    const auto error = textOptionError(
-        option.key,
-        normalizedOption(option, preferences.options.value(option.key))
-            .toString());
-    if (!error.isEmpty()) {
-      emit message(option.title + ": " + error);
-      return false;
-    }
-  }
-  if (!recording.isEmpty() && recordingFormat(preferences) == "mp4" &&
-      preferences.audio &&
-      preferences.options.value("audio-codec").toString() == "raw") {
-    emit message("MP4 cannot contain raw audio. Choose MKV, another audio "
-                 "codec, or disable audio forwarding.");
+  const auto issue = sessionIssue(preferences, !recording.isEmpty());
+  if (!issue.message.isEmpty()) {
+    emit message(issue.message);
     return false;
   }
   bool authorized = false;
@@ -817,6 +926,13 @@ bool Engine::start(const QString &serial, const QString &recording) {
   activeSerial = serial;
   activeRecording = recording;
   activeReadOnly = preferences.options.value("no-control", false).toBool();
+  activeAlternateDisplay =
+      preferences.options.value("virtual-display", false).toBool() ||
+      preferences.options.value("display-id", 0).toInt() != 0;
+  activeFlexibleDisplay =
+      preferences.options.value("virtual-display", false).toBool() &&
+      preferences.options.value("flex-display", false).toBool() &&
+      !activeReadOnly;
   stopping = false;
   state = SessionState::Starting;
   windowCommandsReady = false;
@@ -894,8 +1010,11 @@ void Engine::readMirrorOutput() {
                                 "support from the bundled engine.");
     } else if (event == "window-controls-ready" && bridgeReady) {
       windowCommandsReady = true;
-      emit windowControlMessage("Window controls ready. These actions affect "
-                                "the computer display only.");
+      emit windowControlMessage(activeFlexibleDisplay
+                                    ? "Window controls ready. Resizing also "
+                                      "changes the Android virtual display."
+                                    : "Window controls ready. These actions "
+                                      "affect the computer display only.");
     } else if (event.startsWith("window-result:") && bridgeReady &&
                pendingWindowCommand) {
       const QByteArray expected =
@@ -1011,6 +1130,12 @@ bool Engine::canUseDevice(const QString &serial) {
 }
 
 void Engine::capture(const QString &serial, const QString &path) {
+  if (!captureAllowed(serial)) {
+    emit message("Screenshots of active secondary or virtual displays are not "
+                 "supported yet. Use session recording instead; the primary "
+                 "display was not captured.");
+    return;
+  }
   if (!canUseDevice(serial) || path.isEmpty())
     return;
   capturePath = path;
@@ -1056,6 +1181,12 @@ bool Engine::controlAllowed() const {
 }
 
 void Engine::phoneAction(const QString &serial, PhoneAction action) {
+  if (usesAlternateDisplay()) {
+    emit message("Phone-toolbar commands are disabled for secondary or virtual "
+                 "displays. Use input inside the mirror window; no command was "
+                 "sent to the primary display.");
+    return;
+  }
   if (!controlAllowed()) {
     emit message(
         "Phone controls are disabled while stopping or in read-only mode.");

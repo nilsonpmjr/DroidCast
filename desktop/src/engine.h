@@ -34,6 +34,10 @@ bool sessionOptionAvailable(const SessionOption &option,
                             const Preferences &prefs);
 QString recordingFormat(const Preferences &prefs);
 QString textOptionError(const QString &key, const QString &value);
+struct PreferenceIssue {
+  QString key, message;
+};
+PreferenceIssue sessionIssue(const Preferences &prefs, bool recording = false);
 QList<Device> parseDevices(const QString &output);
 QStringList mirrorArguments(const QString &serial, const Preferences &prefs,
                             const QString &recording = {});
@@ -58,6 +62,12 @@ public:
   enum class PhoneAction { Back, Home, Recents, Power, VolumeUp, VolumeDown };
   void phoneAction(const QString &serial, PhoneAction action);
   bool controlAllowed() const;
+  bool usesAlternateDisplay() const {
+    return running() && activeAlternateDisplay;
+  }
+  bool captureAllowed(const QString &serial) const {
+    return !usesAlternateDisplay() || serial != activeSerial;
+  }
   enum class WindowAction {
     Fullscreen,
     Fit,
@@ -115,6 +125,7 @@ private:
   QByteArray deviceOutput;
   QString capturePath;
   bool commandTask = false, activeReadOnly = false;
+  bool activeAlternateDisplay = false, activeFlexibleDisplay = false;
   bool deviceTimedOut = false;
   bool canUseDevice(const QString &serial);
   bool stopping = false, scanTimedOut = false, wirelessTimedOut = false;

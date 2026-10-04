@@ -81,12 +81,25 @@ Windows/macOS build paths have not yet been exercised.
   encoder name and automatic-downsize opt-out. Inspect an authorized phone while
   idle to read its real display/encoder report, then copy the desired ID or name.
   Inspection has cancellation and a timeout; it does not start a mirror.
+  The **Virtual display** category adds Android 10+ display creation, resolution/
+  density, flexible resizing, keyboard placement, system decorations and app
+  handling on close. An optional exact Android package starts on that display;
+  no search or force-stop prefix is accepted. Some phones have no launcher there,
+  so leaving the package empty may produce no video. These changes take effect
+  only after explicitly starting a session.
 - **Diagnostics:** bounded in-memory output from the engine and device services.
 
 Recordings go directly to the chosen capture directory (default: Videos/DroidCast)
 with unique filenames. Screenshots are validated as PNG before atomic saving. APK
 installation runs only after choosing a file; an install failure is reported even
 if ADB exits with code zero. There is no pretend battery, latency or device data.
+
+Phone-toolbar commands and ADB screenshots currently target the primary display.
+They are disabled for an active secondary/virtual display so they cannot silently
+act on the wrong screen. Use input inside the mirror and session recording there.
+Host-window controls remain available; in flexible-display mode, resizing also
+changes Android's display. Read-only mode disables flexible resizing and app
+launch, but creating an explicitly selected virtual display still occurs.
 
 Close the mirror window or use Stop to request normal engine cleanup. The fork
 reports recorder finalization separately from process completion. An unresponsive
