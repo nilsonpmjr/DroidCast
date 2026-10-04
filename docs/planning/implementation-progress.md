@@ -1,5 +1,9 @@
 # Incremental implementation
 
+For a concise view of what works, what remains and the concrete next steps, start
+with [the gap register](gap-register.md). This file retains the chronological
+implementation record.
+
 ## Part 1: configuration and phone controls
 
 - Preserved the approved native design and palette.

@@ -1,5 +1,9 @@
 # DroidCast Desktop
 
+Project status and remaining work are summarized in the
+[gap register](../docs/planning/gap-register.md); the longer planning documents
+retain specifications, tickets and chronological implementation notes.
+
 A native C++17 / Qt 6 workspace built around this scrcpy fork. DroidCast includes
 its engine, ADB and Android server. Users open the app, connect a phone and start
 mirroring; there is no executable picker or separate scrcpy installation step.
