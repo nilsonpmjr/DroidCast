@@ -26,3 +26,23 @@ Verification: CMake build and offscreen Qt tests, including settings round-trip,
 argument validation, search filtering, command targeting and read-only snapshot.
 Hardware validation is still required; no phone interaction is claimed from the
 fake-process tests. Windows and macOS are not verified by this Linux build.
+
+## Part 2: navigation and engine lifecycle
+
+- Added a category picker for the implemented Video, Audio, Device, Window and
+  Recording settings. Category and text filters combine; connection and input
+  destinations are directly reachable. This is not yet all 16 planned routes.
+- Added an opt-in, versioned bridge to the bundled C fork. The desktop distinguishes
+  Starting, Streaming (first frame), Stopping, Ended, Failed and Disconnected.
+- Stop sends a quit request through the bridge instead of terminating the process.
+  Recorder finalization is reported independently, and output-close errors now
+  contribute to recorder failure. Timeout kills retain a warning rather than
+  being misreported as successful stops.
+- Disabled repeated stops and phone mutations during cleanup. A new session can
+  start only after the old process exits.
+- Added desktop lifecycle/failure tests and a real pipe-to-SDL bridge test. These
+  passed on Linux; playable recording and disconnect checks with hardware remain
+  required before closing tickets 1–3.
+
+See `desktop/BRIDGE.md` for the protocol and limitations. The phone toolbar still
+uses ADB; this bridge currently carries lifecycle events and quit only.

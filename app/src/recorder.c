@@ -173,10 +173,15 @@ sc_recorder_open_output_file(struct sc_recorder *recorder) {
     return true;
 }
 
-static void
+static bool
 sc_recorder_close_output_file(struct sc_recorder *recorder) {
-    avio_close(recorder->ctx->pb);
+    int ret = avio_close(recorder->ctx->pb);
     avformat_free_context(recorder->ctx);
+    if (ret < 0) {
+        LOGE("Failed to close recording file: %s", recorder->filename);
+        return false;
+    }
+    return true;
 }
 
 static inline bool
@@ -468,8 +473,8 @@ sc_recorder_record(struct sc_recorder *recorder) {
     }
 
     ok = sc_recorder_process_packets(recorder);
-    sc_recorder_close_output_file(recorder);
-    return ok;
+    bool closed = sc_recorder_close_output_file(recorder);
+    return ok && closed;
 }
 
 static int

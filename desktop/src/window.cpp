@@ -595,6 +595,22 @@ QWidget *Window::settingsPage() {
   search->setAccessibleName("Search settings");
   search->setPlaceholderText("Search settings, categories or scrcpy flags…");
   layout->addWidget(search);
+  auto *categoryPicker = new QComboBox;
+  categoryPicker->setObjectName("settingsCategory");
+  categoryPicker->setAccessibleName("Configuration category");
+  categoryPicker->addItems(
+      {"All settings", "Video", "Audio", "Device", "Window", "Recording"});
+  layout->addWidget(categoryPicker);
+  auto *routes = new QHBoxLayout;
+  auto *connectionRoute = button("Connection settings", "wifi");
+  auto *inputRoute = button("Keyboard, mouse && shortcuts", "input");
+  routes->addWidget(connectionRoute);
+  routes->addWidget(inputRoute);
+  routes->addStretch();
+  layout->addLayout(routes);
+  connect(connectionRoute, &QPushButton::clicked, this,
+          [this] { showPage(2); });
+  connect(inputRoute, &QPushButton::clicked, this, [this] { showPage(4); });
   auto *video = new QGroupBox("Display && video quality");
   auto *form = new QFormLayout(video);
   form->setSpacing(14);
@@ -669,6 +685,8 @@ QWidget *Window::settingsPage() {
                          "muted"));
   layout->addWidget(behavior);
   QList<QWidget *> searchable{video, behavior};
+  video->setProperty("categories", QStringList{"Video"});
+  behavior->setProperty("categories", QStringList{"Audio", "Device", "Window"});
   video->setProperty("searchTerms",
                      "video resolution fps frame rate bitrate codec");
   behavior->setProperty("searchTerms",
@@ -722,25 +740,13 @@ QWidget *Window::settingsPage() {
       fields->addRow(label(option.help, "muted"));
     }
     group->setProperty("searchTerms", terms);
+    group->setProperty("categories", QStringList{category});
     searchable.append(group);
     layout->addWidget(group);
   }
   auto *noResults = label("No matching settings in this release.", "muted");
   noResults->hide();
   layout->addWidget(noResults);
-  connect(search, &QLineEdit::textChanged, this,
-          [searchable, noResults](const QString &text) {
-            bool found = false;
-            for (auto *group : searchable) {
-              const bool matches =
-                  group->property("searchTerms")
-                      .toString()
-                      .contains(text.trimmed(), Qt::CaseInsensitive);
-              group->setVisible(matches);
-              found |= matches;
-            }
-            noResults->setVisible(!found);
-          });
   QVBoxLayout *storage;
   auto *storageCard = card(storage);
   storage->addWidget(label("Capture storage", "section"));
@@ -759,6 +765,29 @@ QWidget *Window::settingsPage() {
     }
   });
   layout->addWidget(storageCard);
+  storageCard->setProperty("categories", QStringList{"Recording"});
+  storageCard->setProperty("searchTerms",
+                           "recording capture storage folder directory");
+  searchable.append(storageCard);
+  auto filter = [searchable, noResults, search, categoryPicker] {
+    bool found = false;
+    for (auto *group : searchable) {
+      const bool categoryMatches = categoryPicker->currentIndex() == 0 ||
+                                   group->property("categories")
+                                       .toStringList()
+                                       .contains(categoryPicker->currentText());
+      const bool matches =
+          categoryMatches &&
+          group->property("searchTerms")
+              .toString()
+              .contains(search->text().trimmed(), Qt::CaseInsensitive);
+      group->setVisible(matches);
+      found |= matches;
+    }
+    noResults->setVisible(!found);
+  };
+  connect(search, &QLineEdit::textChanged, this, filter);
+  connect(categoryPicker, &QComboBox::currentIndexChanged, this, filter);
   layout->addWidget(
       label("Saved automatically on this computer. The engine, Android server "
             "and connection tools are included with DroidCast Desktop.",
@@ -873,8 +902,9 @@ void Window::updateActions() {
   const bool running = engine.running();
   startButton->setEnabled(ready && !running);
   recordButton->setEnabled(ready && !running);
-  stopButton->setEnabled(running);
-  sessionStop->setEnabled(running);
+  stopButton->setEnabled(running && engine.sessionState() !=
+                                        Engine::SessionState::Stopping);
+  sessionStop->setEnabled(stopButton->isEnabled());
   bool activeReady = false;
   for (const auto &d : engine.devices)
     if (d.serial == engine.activeSerial && d.ready())
@@ -905,13 +935,12 @@ void Window::updateActions() {
     deviceHelp->setText(
         "Waiting for your first device. Discovery runs automatically; "
         "mirroring starts only when you choose it.");
-  sessionStatus->setText(running
-                             ? "Session process running: " + engine.activeSerial
-                             : "No active session");
-  headerStatus->setText(running ? "Session running" : "No active session");
+  sessionStatus->setText(engine.sessionStateText() +
+                         (running ? ": " + engine.activeSerial : QString{}));
+  headerStatus->setText(engine.sessionStateText());
   sessionDetail->setText(
       running
-          ? "Mirror launched for " + engine.activeSerial +
+          ? engine.sessionStateText() + " · " + engine.activeSerial +
                 "\n\nYour live display opens in a separate DroidCast window. "
                 "Use the controls here for screenshots and applications." +
                 (engine.activeRecording.isEmpty()

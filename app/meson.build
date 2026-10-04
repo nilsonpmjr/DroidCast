@@ -12,6 +12,7 @@ src = [
     'src/control_msg.c',
     'src/controller.c',
     'src/decoder.c',
+    'src/desktop_bridge.c',
     'src/demuxer.c',
     'src/device_msg.c',
     'src/disconnect.c',
@@ -286,6 +287,13 @@ if get_option('buildtype') == 'debug'
             'tests/test_vector.c',
         ]],
     ]
+
+    if host_machine.system() != 'windows'
+        tests += [['test_desktop_bridge', [
+            'tests/test_desktop_bridge.c',
+            'src/desktop_bridge.c',
+        ]]]
+    endif
 
     foreach t : tests
         sources = t[1] + ['src/compat.c']

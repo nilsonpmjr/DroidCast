@@ -1,4 +1,5 @@
 #include "screen.h"
+#include "desktop_bridge.h"
 
 #include <assert.h>
 #include <string.h>
@@ -951,6 +952,7 @@ sc_screen_apply_frame(struct sc_screen *screen, bool can_resize) {
     }
 
     sc_screen_render(screen, false);
+    sc_desktop_bridge_first_frame();
     return true;
 }
 

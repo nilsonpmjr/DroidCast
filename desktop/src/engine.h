@@ -52,6 +52,17 @@ public:
   enum class PhoneAction { Back, Home, Recents, Power, VolumeUp, VolumeDown };
   void phoneAction(const QString &serial, PhoneAction action);
   bool controlAllowed() const;
+  enum class SessionState {
+    Idle,
+    Starting,
+    Streaming,
+    Stopping,
+    Ended,
+    Failed,
+    Disconnected
+  };
+  SessionState sessionState() const { return state; }
+  QString sessionStateText() const;
   bool scanning() const { return scan.state() != QProcess::NotRunning; }
   bool running() const { return mirror.state() != QProcess::NotRunning; }
   bool wirelessBusy() const { return wireless.state() != QProcess::NotRunning; }
@@ -78,5 +89,10 @@ private:
   bool deviceTimedOut = false;
   bool canUseDevice(const QString &serial);
   bool stopping = false, scanTimedOut = false, wirelessTimedOut = false;
+  SessionState state = SessionState::Idle;
+  bool forcedStop = false, bridgeReady = false, recordingFinalized = false,
+       recordingFailed = false;
+  QByteArray sessionToken, mirrorOutput;
+  void readMirrorOutput();
   QByteArray scanOutput, wirelessOutput, pairingInput;
 };

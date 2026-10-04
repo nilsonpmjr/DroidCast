@@ -3,6 +3,7 @@
 #include "window.h"
 #include <QApplication>
 #include <QCheckBox>
+#include <QComboBox>
 #include <QImage>
 #include <QLineEdit>
 #include <QListWidget>
@@ -41,6 +42,51 @@ private slots:
     applyTheme(*qobject_cast<QApplication *>(QCoreApplication::instance()));
   }
   void init() { qunsetenv("HUB_TEST_MODE"); }
+  void lifecycleUsesFramesAndFinalizesRecording() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy messages(&engine, &Engine::message);
+    QVERIFY(engine.start("PHONE123", storage.filePath("session.mp4")));
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Starting);
+    QTRY_COMPARE_WITH_TIMEOUT(engine.sessionState(),
+                              Engine::SessionState::Streaming, 3000);
+    engine.stop();
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Stopping);
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Ended);
+    QVERIFY(messages.last().first().toString().contains("Recording finalized"));
+    qputenv("HUB_TEST_MODE", "no-frame");
+    QVERIFY(engine.start("PHONE123"));
+    QTest::qWait(200);
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Starting);
+    engine.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
+  }
+  void lifecyclePreservesFailureAndDisconnect() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy messages(&engine, &Engine::message);
+    qputenv("HUB_TEST_MODE", "recording-error");
+    QVERIFY(engine.start("PHONE123", storage.filePath("failed.mp4")));
+    QTRY_COMPARE_WITH_TIMEOUT(engine.sessionState(),
+                              Engine::SessionState::Streaming, 3000);
+    engine.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Failed);
+    QVERIFY(messages.last().first().toString().contains("incomplete"));
+    qputenv("HUB_TEST_MODE", "disconnect");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Disconnected);
+    qputenv("HUB_TEST_MODE", "ignore-quit");
+    QVERIFY(engine.start("PHONE123"));
+    engine.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 7000);
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Failed);
+    QVERIFY(messages.last().first().toString().contains("forced"));
+  }
   void advancedSettingsAreValidatedAndPersisted() {
     QSettings settings(storage.filePath("advanced.ini"), QSettings::IniFormat);
     Preferences prefs;
@@ -112,6 +158,23 @@ private slots:
                 ->isHidden());
     search->clear();
     QVERIFY(!window.findChild<QWidget *>("option-audio-codec")
+                 ->parentWidget()
+                 ->isHidden());
+    auto *category = window.findChild<QComboBox *>("settingsCategory");
+    QVERIFY(category);
+    category->setCurrentText("Audio");
+    QVERIFY(window.findChild<QWidget *>("option-video-buffer")
+                ->parentWidget()
+                ->isHidden());
+    QVERIFY(!window.findChild<QWidget *>("option-audio-codec")
+                 ->parentWidget()
+                 ->isHidden());
+    search->setText("fullscreen");
+    QVERIFY(window.findChild<QWidget *>("option-fullscreen")
+                ->parentWidget()
+                ->isHidden());
+    category->setCurrentText("Window");
+    QVERIFY(!window.findChild<QWidget *>("option-fullscreen")
                  ->parentWidget()
                  ->isHidden());
     int controls = 0;
@@ -267,7 +330,7 @@ private slots:
     window.showPage(0);
     QTest::mouseClick(stop, Qt::LeftButton);
     QTRY_VERIFY_WITH_TIMEOUT(!stop->isEnabled(), 7000);
-    QVERIFY(start->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(start->isEnabled(), 7000);
   }
   void captureWritesOnlyValidImages() {
     Engine engine;

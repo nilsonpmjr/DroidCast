@@ -3,6 +3,12 @@
 #include <QImage>
 #include <QTextStream>
 #include <QTimer>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#else
+#include <poll.h>
+#include <unistd.h>
+#endif
 
 int main(int argc, char **argv) {
   QCoreApplication app(argc, argv);
@@ -59,6 +65,51 @@ int main(int argc, char **argv) {
     return 1;
   out << "Test mirror process\n";
   out.flush();
+  const auto prefix =
+      "DROIDCAST/1 " + qEnvironmentVariable("DROIDCAST_SESSION_TOKEN") + " ";
+  auto report = [&](const QString &event) {
+    out << prefix << event << '\n';
+    out.flush();
+  };
+  report("bridge-ready");
+  // Log text and events from a different session cannot establish readiness.
+  out << "first-frame\nDROIDCAST/1 00000000000000000000000000000000 "
+         "first-frame\n";
+  out.flush();
+  if (mode != "no-frame")
+    QTimer::singleShot(100, &app, [&] { report("first-frame"); });
+  if (mode == "disconnect")
+    QTimer::singleShot(250, &app, [&] {
+      report("disconnected");
+      app.exit(2);
+    });
+  QTimer commands;
+  QObject::connect(&commands, &QTimer::timeout, &app, [&] {
+    if (mode == "ignore-quit")
+      return;
+    char command;
+#ifdef Q_OS_WIN
+    DWORD available, received;
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    if (!PeekNamedPipe(input, nullptr, 0, nullptr, &available, nullptr) ||
+        !available)
+      return;
+    if (!ReadFile(input, &command, 1, &received, nullptr) || received != 1)
+      return;
+#else
+    struct pollfd input = {STDIN_FILENO, POLLIN, 0};
+    if (poll(&input, 1, 0) <= 0 || read(STDIN_FILENO, &command, 1) != 1) return;
+#endif
+    if (command != 'Q')
+      return;
+    for (const auto &arg : args)
+      if (arg.startsWith("--record="))
+        report(mode == "recording-error" ? "recording-error"
+                                         : "recording-finalized");
+    report("ended");
+    app.quit();
+  });
+  commands.start(10);
   QTimer::singleShot(30000, &app, &QCoreApplication::quit);
   return app.exec();
 }

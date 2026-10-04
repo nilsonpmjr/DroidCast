@@ -17,6 +17,7 @@
 #include "audio_player.h"
 #include "controller.h"
 #include "decoder.h"
+#include "desktop_bridge.h"
 #include "demuxer.h"
 #include "events.h"
 #include "file_pusher.h"
@@ -185,6 +186,7 @@ sc_recorder_on_ended(struct sc_recorder *recorder, bool success,
     (void) recorder;
     (void) userdata;
 
+    sc_desktop_bridge_report(success ? "recording-finalized" : "recording-error");
     if (!success) {
         sc_push_event(SC_EVENT_RECORDER_ERROR);
     }
@@ -432,6 +434,8 @@ scrcpy(struct scrcpy_options *options) {
     if (!sc_server_init(&s->server, &params, &cbs, NULL)) {
         return SCRCPY_EXIT_FAILURE;
     }
+
+    sc_desktop_bridge_start();
 
 #ifdef _WIN32
     sdl_configure_ctrl_c_windows();
@@ -912,6 +916,7 @@ aoa_complete:
     disconnected = ret == SCRCPY_EXIT_DISCONNECTED;
 
 end:
+    sc_desktop_bridge_stop();
     if (timeout_started) {
         sc_timeout_stop(&s->timeout);
     }
@@ -1031,6 +1036,10 @@ end:
     }
 
     sc_server_destroy(&s->server);
+
+    sc_desktop_bridge_report(ret == SCRCPY_EXIT_SUCCESS ? "ended"
+                            : ret == SCRCPY_EXIT_DISCONNECTED ? "disconnected"
+                            : "failed");
 
     return ret;
 }

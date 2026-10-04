@@ -8,6 +8,7 @@
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QUuid>
 
 const QList<SessionOption> &sessionOptions() {
   static const QList<SessionOption> options{
@@ -285,6 +286,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
   });
   connect(&stopTimeout, &QTimer::timeout, this, [this] {
     if (running()) {
+      forcedStop = true;
       emit message("scrcpy did not exit; forcing it to stop. A recording may "
                    "be incomplete.");
       mirror.kill();
@@ -318,18 +320,23 @@ Engine::Engine(QObject *parent) : QObject(parent) {
               emit message(
                   "ADB scan failed. Open Diagnostics for details, then retry.");
           });
-  mirror.setProcessChannelMode(QProcess::MergedChannels);
-  connect(&mirror, &QProcess::readyReadStandardOutput, this, [this] {
-    emit log(QString::fromUtf8(mirror.readAllStandardOutput()));
+  connect(&mirror, &QProcess::readyReadStandardOutput, this,
+          &Engine::readMirrorOutput);
+  connect(&mirror, &QProcess::readyReadStandardError, this, [this] {
+    emit log(QString::fromUtf8(mirror.readAllStandardError()));
   });
   connect(&mirror, &QProcess::started, this, [this] {
-    emit message("scrcpy started. The phone opens in a separate window; "
-                 "connection details appear in Diagnostics.");
+    if (!stopping)
+      emit message(
+          "Connecting to the phone. Waiting for the first video frame…");
     emit sessionChanged();
   });
   connect(&mirror, &QProcess::errorOccurred, this,
           [this](QProcess::ProcessError error) {
             if (error == QProcess::FailedToStart) {
+              stopTimeout.stop();
+              state = SessionState::Failed;
+              stopping = false;
               activeSerial.clear();
               activeRecording.clear();
               emit message("The bundled mirror engine could not start. See "
@@ -337,20 +344,39 @@ Engine::Engine(QObject *parent) : QObject(parent) {
               emit sessionChanged();
             }
           });
-  connect(
-      &mirror, &QProcess::finished, this,
-      [this](int code, QProcess::ExitStatus status) {
-        stopTimeout.stop();
-        activeSerial.clear();
-        activeRecording.clear();
-        emit log(QString::fromUtf8(mirror.readAllStandardOutput()));
-        emit message(
-            stopping || (code == 0 && status == QProcess::NormalExit)
-                ? "Session ended. You can start another mirror."
-                : "scrcpy exited with an error. Open Diagnostics for details.");
-        stopping = false;
-        emit sessionChanged();
-      });
+  connect(&mirror, &QProcess::finished, this,
+          [this](int code, QProcess::ExitStatus status) {
+            stopTimeout.stop();
+            readMirrorOutput();
+            const bool clean = code == 0 && status == QProcess::NormalExit &&
+                               !forcedStop && !recordingFailed;
+            const bool recording = !activeRecording.isEmpty();
+            if (!clean && state != SessionState::Disconnected)
+              state = SessionState::Failed;
+            else if (state != SessionState::Disconnected &&
+                     state != SessionState::Failed)
+              state = SessionState::Ended;
+            activeSerial.clear();
+            activeRecording.clear();
+            if (forcedStop)
+              emit message("The engine was forced to stop. Any recording may "
+                           "be incomplete.");
+            else if (recording && (!recordingFinalized || recordingFailed))
+              emit message("Recording finalization was not confirmed. The file "
+                           "may be incomplete; see Diagnostics.");
+            else if (state == SessionState::Disconnected)
+              emit message(
+                  "Phone disconnected. Reconnect it and start a new session.");
+            else if (state == SessionState::Failed)
+              emit message(
+                  "scrcpy exited with an error. Open Diagnostics for details.");
+            else
+              emit message(
+                  recording ? "Recording finalized. Session ended."
+                            : "Session ended. You can start another mirror.");
+            stopping = false;
+            emit sessionChanged();
+          });
   wireless.setProcessChannelMode(QProcess::MergedChannels);
   connect(&wireless, &QProcess::stateChanged, this,
           [this] { emit wirelessChanged(); });
@@ -464,7 +490,10 @@ Engine::Engine(QObject *parent) : QObject(parent) {
 Engine::~Engine() {
   for (auto *process : {&scan, &wireless, &mirror, &deviceTask}) {
     if (process->state() != QProcess::NotRunning) {
-      process->terminate();
+      if (process == &mirror)
+        process->write("Q", 1);
+      else
+        process->terminate();
       if (!process->waitForFinished(1500)) {
         process->kill();
         process->waitForFinished(1500);
@@ -516,11 +545,16 @@ bool Engine::start(const QString &serial, const QString &recording) {
   env.insert("ADB", executablePath(preferences.adb));
   if (!preferences.server.isEmpty())
     env.insert("SCRCPY_SERVER_PATH", preferences.server);
-  mirror.setProcessEnvironment(env);
   activeSerial = serial;
   activeRecording = recording;
   activeReadOnly = preferences.options.value("no-control", false).toBool();
   stopping = false;
+  state = SessionState::Starting;
+  forcedStop = bridgeReady = recordingFinalized = recordingFailed = false;
+  mirrorOutput.clear();
+  sessionToken = QUuid::createUuid().toString(QUuid::Id128).toLatin1();
+  env.insert("DROIDCAST_SESSION_TOKEN", QString::fromLatin1(sessionToken));
+  mirror.setProcessEnvironment(env);
   const auto args = mirrorArguments(serial, preferences, recording);
   emit log("Starting " + preferences.scrcpy +
            "\nArguments: " + args.join(" | "));
@@ -533,9 +567,67 @@ void Engine::stop() {
   if (!running() || stopping)
     return;
   stopping = true;
-  emit message("Stopping scrcpy…");
-  mirror.terminate();
+  state = SessionState::Stopping;
+  emit message("Stopping session and finishing any recording…");
+  // The fork handles this on its SDL event loop, following window-close
+  // cleanup. QProcess buffers the byte if the process is still starting.
+  mirror.write("Q", 1);
   stopTimeout.start(5000);
+  emit sessionChanged();
+}
+
+QString Engine::sessionStateText() const {
+  switch (state) {
+  case SessionState::Idle:
+    return "No active session";
+  case SessionState::Starting:
+    return "Starting session";
+  case SessionState::Streaming:
+    return "Streaming";
+  case SessionState::Stopping:
+    return "Finishing session";
+  case SessionState::Ended:
+    return "Session ended";
+  case SessionState::Failed:
+    return "Session failed";
+  case SessionState::Disconnected:
+    return "Phone disconnected";
+  }
+  return {};
+}
+
+void Engine::readMirrorOutput() {
+  mirrorOutput += mirror.readAllStandardOutput();
+  const QByteArray prefix = "DROIDCAST/1 " + sessionToken + ' ';
+  qsizetype newline;
+  while ((newline = mirrorOutput.indexOf('\n')) >= 0) {
+    const auto line = mirrorOutput.left(newline).trimmed();
+    mirrorOutput.remove(0, newline + 1);
+    if (!line.startsWith(prefix)) {
+      emit log(QString::fromUtf8(line));
+      continue;
+    }
+    const auto event = line.mid(prefix.size());
+    if (event == "bridge-ready")
+      bridgeReady = true;
+    else if (event == "first-frame" && bridgeReady &&
+             state == SessionState::Starting) {
+      state = SessionState::Streaming;
+      emit message("Phone video is streaming in the mirror window.");
+    } else if (event == "recording-finalized" && bridgeReady)
+      recordingFinalized = true;
+    else if (event == "recording-error" && bridgeReady)
+      recordingFailed = true;
+    else if (event == "disconnected" && bridgeReady)
+      state = SessionState::Disconnected;
+    else if (event == "failed" && bridgeReady)
+      state = SessionState::Failed;
+    emit sessionChanged();
+  }
+  if (mirrorOutput.size() > 65536) {
+    emit log(QString::fromUtf8(mirrorOutput.left(65536)));
+    mirrorOutput.clear();
+  }
 }
 
 void Engine::connectWireless(const QString &endpoint, const QString &code) {
@@ -582,7 +674,12 @@ void Engine::capture(const QString &serial, const QString &path) {
 
 void Engine::installApk(const QString &serial, const QString &path) {
   if (!controlAllowed()) {
-    emit message("APK installation is disabled in read-only mode.");
+    emit message(
+        "APK installation is disabled while stopping or in read-only mode.");
+    return;
+  }
+  if (running() && serial != activeSerial) {
+    emit message("APK installation must target the active session.");
     return;
   }
   if (!canUseDevice(serial))
@@ -602,13 +699,15 @@ void Engine::installApk(const QString &serial, const QString &path) {
 }
 
 bool Engine::controlAllowed() const {
-  return !(running() ? activeReadOnly
+  return !stopping &&
+         !(running() ? activeReadOnly
                      : preferences.options.value("no-control", false).toBool());
 }
 
 void Engine::phoneAction(const QString &serial, PhoneAction action) {
   if (!controlAllowed()) {
-    emit message("Phone controls are disabled in read-only mode.");
+    emit message(
+        "Phone controls are disabled while stopping or in read-only mode.");
     return;
   }
   if (running() && serial != activeSerial) {
