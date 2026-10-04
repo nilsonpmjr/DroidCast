@@ -762,6 +762,7 @@ QWidget *Window::settingsPage() {
       const auto current = normalizedOption(
           option, engine.preferences.options.value(option.key));
       QWidget *control;
+      QLabel *validation = nullptr;
       if (!option.choices.isEmpty()) {
         auto *combo = new QComboBox;
         combo->addItems(option.choices);
@@ -772,6 +773,27 @@ QWidget *Window::settingsPage() {
                   savePreferences();
                 });
         control = combo;
+      } else if (option.initial.metaType().id() == QMetaType::QString) {
+        auto *edit = new QLineEdit;
+        edit->setMaxLength(256);
+        edit->setText(current.toString());
+        validation = label("", "muted");
+        validation->setObjectName("error-" + option.key);
+        auto validate = [edit, validation, key = option.key] {
+          const auto error = textOptionError(key, edit->text().trimmed());
+          validation->setText(error.isEmpty() ? QString{}
+                                              : "Invalid value: " + error);
+          validation->setVisible(!error.isEmpty());
+          edit->setAccessibleDescription(error);
+        };
+        validate();
+        connect(edit, &QLineEdit::editingFinished, this, validate);
+        connect(edit, &QLineEdit::textChanged, this,
+                [this, key = option.key](const QString &value) {
+                  engine.preferences.options.insert(key, value.trimmed());
+                  savePreferences();
+                });
+        control = edit;
       } else if (option.initial.metaType().id() == QMetaType::Bool) {
         auto *check = toggle(option.title, current.toBool());
         connect(check, &QCheckBox::toggled, this,
@@ -798,7 +820,44 @@ QWidget *Window::settingsPage() {
                                ? "\n--prefer-text / --raw-key-events"
                                : "\n--" + option.key));
       field(fields, option.title, control);
+      if (validation)
+        fields->addRow(validation);
       fields->addRow(label(option.help, "muted"));
+    }
+    if (category == "Video") {
+      terms +=
+          " inspect resources displays encoders list-displays list-encoders";
+      auto *inspect = button("Inspect selected phone", "phone");
+      inspect->setProperty("inspectDevice", true);
+      inspect->setObjectName("inspectDevice");
+      auto *cancel = button("Cancel inspection");
+      cancel->setProperty("cancelInspection", true);
+      auto *actions = new QHBoxLayout;
+      actions->addWidget(inspect);
+      actions->addWidget(cancel);
+      fields->addRow(actions);
+      auto *report = new QPlainTextEdit;
+      report->setObjectName("deviceCapabilities");
+      report->setAccessibleName("Selected phone displays and encoders report");
+      report->setReadOnly(true);
+      report->setMaximumBlockCount(1000);
+      report->setMinimumHeight(160);
+      report->setPlainText(
+          "Select an authorized phone in Connected devices, then inspect it "
+          "while no mirror is running. Copy a display ID or matching encoder "
+          "name into the fields above. Listed resources may change after "
+          "reconnecting.");
+      fields->addRow(report);
+      connect(inspect, &QPushButton::clicked, this,
+              [this] { engine.inspectDevice(selectedSerial()); });
+      connect(cancel, &QPushButton::clicked, &engine,
+              &Engine::cancelInspection);
+      connect(&engine, &Engine::inspectionResult, report,
+              [report](const QString &serial, const QString &output) {
+                report->setPlainText("Device: " + serial + "\n\n" + output);
+              });
+      connect(&engine, &Engine::inspectionChanged, this,
+              &Window::updateActions);
     }
     group->setProperty("searchTerms", terms);
     group->setProperty("categories", QStringList{category});
@@ -964,8 +1023,8 @@ void Window::updateActions() {
   const auto state = item ? item->data(Qt::UserRole + 1).toString() : QString{};
   const bool ready = state == "device";
   const bool running = engine.running();
-  startButton->setEnabled(ready && !running);
-  recordButton->setEnabled(ready && !running);
+  startButton->setEnabled(ready && !running && !engine.inspecting());
+  recordButton->setEnabled(startButton->isEnabled());
   stopButton->setEnabled(running && engine.sessionState() !=
                                         Engine::SessionState::Stopping);
   sessionStop->setEnabled(stopButton->isEnabled());
@@ -983,6 +1042,10 @@ void Window::updateActions() {
                           engine.controlAllowed());
     else if (control->property("windowControl").toBool())
       control->setEnabled(engine.windowControlsAvailable());
+    else if (control->property("inspectDevice").toBool())
+      control->setEnabled(ready && !running && !engine.deviceBusy());
+    else if (control->property("cancelInspection").toBool())
+      control->setEnabled(engine.inspecting());
   if (state == "unauthorized")
     deviceHelp->setText("Unlock your phone and accept the USB debugging "
                         "prompt. Devices refresh automatically.");
@@ -1024,6 +1087,25 @@ bool Window::ensureCaptureDirectory() {
   return false;
 }
 void Window::launch(bool record) {
+  for (const auto &option : sessionOptions()) {
+    const auto error = textOptionError(
+        option.key,
+        normalizedOption(option, engine.preferences.options.value(option.key))
+            .toString());
+    if (!error.isEmpty()) {
+      findChild<QLineEdit *>("settingsSearch")->clear();
+      findChild<QComboBox *>("settingsCategory")
+          ->setCurrentText(option.category);
+      showPage(5);
+      if (auto *edit = findChild<QLineEdit *>("option-" + option.key)) {
+        edit->setFocus();
+        QMetaObject::invokeMethod(edit, "editingFinished",
+                                  Qt::DirectConnection);
+      }
+      notice->setText(option.title + ": " + error);
+      return;
+    }
+  }
   const auto serial = selectedSerial();
   if (serial.isEmpty())
     return;

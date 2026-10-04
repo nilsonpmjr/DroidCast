@@ -8,6 +8,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QPlainTextEdit>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTemporaryDir>
@@ -43,6 +44,121 @@ private slots:
     applyTheme(*qobject_cast<QApplication *>(QCoreApplication::instance()));
   }
   void init() { qunsetenv("HUB_TEST_MODE"); }
+  void advancedVideoValidationAndArguments() {
+    Preferences prefs;
+    prefs.options = {{"crop", "1080:1920:0:10"},
+                     {"video-encoder", "c2.android.avc.encoder"},
+                     {"display-id", 2},
+                     {"capture-orientation", "@90"},
+                     {"no-downsize-on-error", true}};
+    auto args = mirrorArguments("PHONE123", prefs);
+    for (const auto &arg :
+         {"--crop=1080:1920:0:10", "--video-encoder=c2.android.avc.encoder",
+          "--display-id=2", "--capture-orientation=@90",
+          "--no-downsize-on-error"})
+      QVERIFY(args.contains(arg));
+    QSettings settings(storage.filePath("video.ini"), QSettings::IniFormat);
+    prefs.save(settings);
+    QCOMPARE(Preferences::load(settings).options.value("crop").toString(),
+             QString("1080:1920:0:10"));
+    for (const auto &invalid : {"0:200:0:0", "100:-5:0:0", "100:100:0",
+                                "100:100:0:0;exit", "99999:20:0:0"})
+      QVERIFY(!textOptionError("crop", invalid).isEmpty());
+    QVERIFY(!textOptionError("video-encoder", "encoder --bad").isEmpty());
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.options["crop"] = "bad";
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy messages(&engine, &Engine::message);
+    QVERIFY(!engine.start("PHONE123"));
+    QVERIFY(messages.last().first().toString().contains("Capture crop"));
+    QVERIFY(!engine.running());
+    QVERIFY(!mirrorArguments("PHONE123", engine.preferences)
+                 .join(' ')
+                 .contains("--crop=bad"));
+  }
+  void inspectionIsTargetedAndDoesNotStartMirror() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.options["no-control"] = true;
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"},
+                      {"OTHER", "device", "Other", "USB"}};
+    QSignalSpy results(&engine, &Engine::inspectionResult);
+    engine.inspectDevice("LOCKED");
+    QVERIFY(!engine.inspecting());
+    engine.inspectDevice("PHONE123");
+    QVERIFY(engine.inspecting());
+    QVERIFY(!engine.start("OTHER"));
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.inspecting(), 3000);
+    QCOMPARE(results.last()[0].toString(), QString("PHONE123"));
+    QVERIFY(results.last()[1].toString().contains(
+        "--serial=PHONE123|--list-displays|--list-encoders"));
+    QVERIFY(results.last()[1].toString().contains("c2.android.avc.encoder"));
+    QVERIFY(!engine.running());
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Idle);
+    qputenv("HUB_TEST_MODE", "inspect-hang");
+    engine.inspectDevice("OTHER");
+    engine.cancelInspection();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.inspecting(), 3000);
+    QCOMPARE(results.last()[0].toString(), QString("OTHER"));
+    QVERIFY(results.last()[1].toString().contains("canceled"));
+  }
+  void inspectionFailuresAreActionable() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy results(&engine, &Engine::inspectionResult);
+    for (const auto mode : {"inspect-fail", "inspect-overflow"}) {
+      qputenv("HUB_TEST_MODE", mode);
+      engine.inspectDevice("PHONE123");
+      QTRY_VERIFY_WITH_TIMEOUT(!engine.inspecting(), 3000);
+      const auto report = results.last()[1].toString();
+      QVERIFY(report.contains("failed") || report.contains("safety limit"));
+      QVERIFY(report.size() < 2000);
+    }
+    engine.preferences.scrcpy = "/nonexistent/inspection-engine";
+    engine.inspectDevice("PHONE123");
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.inspecting(), 3000);
+    QVERIFY(results.last()[1].toString().contains("Could not start"));
+  }
+  void inspectionTimeoutCanRecover() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy results(&engine, &Engine::inspectionResult);
+    qputenv("HUB_TEST_MODE", "inspect-hang");
+    engine.inspectDevice("PHONE123");
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.inspecting(), 23000);
+    QVERIFY(results.last()[1].toString().contains("timed out"));
+    qunsetenv("HUB_TEST_MODE");
+    engine.inspectDevice("PHONE123");
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.inspecting(), 3000);
+    QVERIFY(results.last()[1].toString().contains("--display-id=0"));
+  }
+  void videoTextFieldShowsInlineValidation() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.showPage(5);
+    auto *crop = window.findChild<QLineEdit *>("option-crop");
+    auto *error = window.findChild<QLabel *>("error-crop");
+    QVERIFY(crop && error);
+    crop->setText("bad");
+    QMetaObject::invokeMethod(crop, "editingFinished", Qt::DirectConnection);
+    QVERIFY(!error->isHidden());
+    QVERIFY(crop->accessibleDescription().contains("width:height"));
+    crop->setText("720:1280:0:0");
+    QMetaObject::invokeMethod(crop, "editingFinished", Qt::DirectConnection);
+    QVERIFY(error->isHidden());
+    auto *inspect = window.findChild<QPushButton *>("inspectDevice");
+    QVERIFY(inspect);
+    QTRY_VERIFY(inspect->isEnabled());
+    inspect->click();
+    auto *report = window.findChild<QPlainTextEdit *>("deviceCapabilities");
+    QTRY_VERIFY(report->toPlainText().contains("c2.android.avc.encoder"));
+    QVERIFY(report->toPlainText().startsWith("Device: PHONE123"));
+    bundledPreferences().save(settings);
+  }
   void windowToolbarIsLabelledAndRespondsToEngine() {
     QSettings settings;
     auto prefs = bundledPreferences();

@@ -33,6 +33,7 @@ struct Preferences {
 bool sessionOptionAvailable(const SessionOption &option,
                             const Preferences &prefs);
 QString recordingFormat(const Preferences &prefs);
+QString textOptionError(const QString &key, const QString &value);
 QList<Device> parseDevices(const QString &output);
 QStringList mirrorArguments(const QString &serial, const Preferences &prefs,
                             const QString &recording = {});
@@ -49,7 +50,9 @@ public:
   Preferences preferences;
   QList<Device> devices;
   QString activeSerial, activeRecording;
-  bool deviceBusy() const { return deviceTask.state() != QProcess::NotRunning; }
+  bool deviceBusy() const {
+    return deviceTask.state() != QProcess::NotRunning || inspecting();
+  }
   void capture(const QString &serial, const QString &path);
   void installApk(const QString &serial, const QString &path);
   enum class PhoneAction { Back, Home, Recents, Power, VolumeUp, VolumeDown };
@@ -81,6 +84,9 @@ public:
   bool running() const { return mirror.state() != QProcess::NotRunning; }
   bool wirelessBusy() const { return wireless.state() != QProcess::NotRunning; }
   void refresh();
+  bool inspecting() const { return inspector.state() != QProcess::NotRunning; }
+  void inspectDevice(const QString &serial);
+  void cancelInspection();
   bool start(const QString &serial, const QString &recording = {});
   void stop();
   void connectWireless(const QString &endpoint, const QString &code = {});
@@ -88,6 +94,8 @@ signals:
   void devicesChanged();
   void sessionChanged();
   void scanChanged();
+  void inspectionChanged();
+  void inspectionResult(const QString &serial, const QString &output);
   void wirelessChanged();
   void deviceTaskChanged();
   void windowControlsChanged();
@@ -98,6 +106,11 @@ signals:
 
 private:
   QProcess scan, mirror, wireless, deviceTask;
+  QProcess inspector;
+  QTimer inspectionTimeout;
+  QByteArray inspectionOutput;
+  QString inspectionSerial;
+  bool inspectionAborted = false;
   QTimer scanTimeout, wirelessTimeout, stopTimeout, deviceTimeout;
   QByteArray deviceOutput;
   QString capturePath;

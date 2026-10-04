@@ -84,3 +84,26 @@ uses ADB; this bridge currently carries lifecycle events and quit only.
   window-manager behavior, Windows and macOS still require manual validation.
 
 This advances ticket 16. Reset-video and other live Android actions remain planned.
+
+## Part 5: advanced capture settings and device inspection
+
+- Added capture crop, capture orientation (including locking/flipping), display
+  ID, explicit video encoder and an option to disable automatic downsizing.
+- Optional crop and encoder fields have validation beside the field. Invalid
+  values block session launch at both UI and engine boundaries; the UI takes the
+  user to the offending field. Preferences remain available for correction.
+- Added a selected-device inspection workflow using the bundled engine's
+  `--list-displays --list-encoders`. Reports show their target serial and remain
+  plain text. This slice supports manual copying of values, not automatic
+  capability parsing or a promise that a codec/encoder combination will work.
+- Inspection does not start mirroring. It is mutually exclusive with mirror
+  launch, has cancellation, a 20-second timeout, bounded output, and failure
+  feedback. It does not inherit the desktop session token. Inspection is allowed
+  in read-only mode; listing still uses scrcpy's normal ADB/server workflow.
+- Tests cover persistence/arguments, malformed values, target isolation, canceled
+  and failed inspections, excessive output, timeout recovery, and UI validation.
+  Real-phone resource enumeration and successful custom capture configurations
+  still require hardware verification.
+
+This advances ticket 17. Camera, virtual display, encoder-specific codec options
+and automatic capability-driven selectors remain future slices.

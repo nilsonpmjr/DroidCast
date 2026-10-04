@@ -17,6 +17,23 @@ int main(int argc, char **argv) {
   const auto mode = qEnvironmentVariable("HUB_TEST_MODE");
   if (mode == "hang")
     return app.exec();
+  if (args.contains("--list-displays")) {
+    if (mode == "inspect-hang")
+      return app.exec();
+    if (mode == "inspect-fail") {
+      out << "Device unavailable";
+      return 1;
+    }
+    if (mode == "inspect-overflow") {
+      out << QString(1100000, 'x');
+      return 0;
+    }
+    out << args.join('|')
+        << "\nList of displays:\n --display-id=0 (1080x2400)\n"
+        << "List of video encoders:\n --video-codec=h264 "
+           "--video-encoder=c2.android.avc.encoder\n";
+    return 0;
+  }
   if (args.contains("keyevent")) {
     out << args.join('|');
     return mode == "command-fail" ? 1 : 0;

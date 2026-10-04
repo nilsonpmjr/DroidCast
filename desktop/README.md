@@ -77,6 +77,10 @@ Windows/macOS build paths have not yet been exercised.
   SDK input preferences, MKV/MP4 recording, recording rotation and session time
   limit. Settings apply to the next session and persist locally. Options that do
   not apply to the chosen input mode are inactive, but their saved values remain.
+  Advanced video includes crop, capture orientation/locking, Android display ID,
+  encoder name and automatic-downsize opt-out. Inspect an authorized phone while
+  idle to read its real display/encoder report, then copy the desired ID or name.
+  Inspection has cancellation and a timeout; it does not start a mirror.
 - **Diagnostics:** bounded in-memory output from the engine and device services.
 
 Recordings go directly to the chosen capture directory (default: Videos/DroidCast)

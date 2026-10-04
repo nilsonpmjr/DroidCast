@@ -12,6 +12,45 @@
 
 const QList<SessionOption> &sessionOptions() {
   static const QList<SessionOption> options{
+      {"crop",
+       "Video",
+       "Capture crop",
+       "Optional width:height:x:y in the phone's natural orientation, for "
+       "example 1080:1920:0:0. The crop must fit the chosen display.",
+       QString(""),
+       {}},
+      {"video-encoder",
+       "Video",
+       "Video encoder",
+       "Leave empty for automatic selection. Inspect the selected phone and "
+       "copy an encoder name matching your video codec.",
+       QString(""),
+       {}},
+      {"display-id",
+       "Video",
+       "Android display ID",
+       "Zero is the primary display. Inspect the phone to discover its current "
+       "display IDs.",
+       0,
+       {},
+       0,
+       2147483647},
+      {"capture-orientation",
+       "Video",
+       "Capture orientation",
+       "Affects capture and recordings. Prefix @ locks to natural orientation; "
+       "@ alone locks the initial orientation.",
+       "0",
+       {"0", "90", "180", "270", "flip0", "flip90", "flip180", "flip270", "@",
+        "@0", "@90", "@180", "@270", "@flip0", "@flip90", "@flip180",
+        "@flip270"}},
+      {"no-downsize-on-error",
+       "Video",
+       "Disable automatic downsizing",
+       "Fail rather than retry a lower resolution when the phone encoder "
+       "rejects the requested size.",
+       false,
+       {}},
       {"key-injection",
        "Keyboard",
        "Key injection",
@@ -176,10 +215,38 @@ QVariant normalizedOption(const SessionOption &option, const QVariant &value) {
     return option.choices.contains(value.toString()) ? value : option.initial;
   if (option.initial.metaType().id() == QMetaType::Bool)
     return value.toBool();
+  if (option.initial.metaType().id() == QMetaType::QString)
+    return value.toString().trimmed();
   bool ok = false;
   int number = value.toInt(&ok);
   return ok ? QVariant(qBound(option.minimum, number, option.maximum))
             : option.initial;
+}
+
+QString textOptionError(const QString &key, const QString &value) {
+  if (value.isEmpty())
+    return {};
+  if (key == "crop") {
+    const auto parts = value.split(':');
+    bool valid = parts.size() == 4;
+    for (int i = 0; valid && i < parts.size(); ++i) {
+      bool ok;
+      const auto n = parts[i].toUInt(&ok);
+      valid =
+          ok &&
+          QRegularExpression("\\A[0-9]{1,5}\\z").match(parts[i]).hasMatch() &&
+          n <= 65535 && (i >= 2 || n > 0);
+    }
+    if (!valid)
+      return "Use width:height:x:y; dimensions 1–65535 and offsets 0–65535, or "
+             "leave empty.";
+  } else if (key == "video-encoder" &&
+             !QRegularExpression("\\A[A-Za-z0-9_.-]{1,256}\\z")
+                  .match(value)
+                  .hasMatch())
+    return "Use an encoder name from the phone report (letters, numbers, dots, "
+           "underscores or hyphens), or leave empty.";
+  return {};
 }
 
 Preferences Preferences::load(QSettings &s) {
@@ -279,6 +346,8 @@ QStringList mirrorArguments(const QString &serial, const Preferences &p,
   }
   for (const auto &option : sessionOptions()) {
     const auto value = normalizedOption(option, p.options.value(option.key));
+    if (!textOptionError(option.key, value.toString()).isEmpty())
+      continue;
     if (!sessionOptionAvailable(option, p))
       continue;
     if (option.key == "record-format") {
@@ -350,6 +419,59 @@ Preferences bundledPreferences() {
 }
 
 Engine::Engine(QObject *parent) : QObject(parent) {
+  inspectionTimeout.setSingleShot(true);
+  inspector.setProcessChannelMode(QProcess::MergedChannels);
+  connect(&inspectionTimeout, &QTimer::timeout, this, [this] {
+    inspectionAborted = true;
+    inspector.kill();
+    emit inspectionResult(inspectionSerial,
+                          "Inspection timed out. Unlock the phone, check the "
+                          "connection and retry.");
+  });
+  connect(&inspector, &QProcess::stateChanged, this,
+          [this] { emit inspectionChanged(); });
+  connect(&inspector, &QProcess::readyReadStandardOutput, this, [this] {
+    inspectionOutput += inspector.readAllStandardOutput();
+    if (inspectionOutput.size() > 1024 * 1024 && !inspectionAborted) {
+      inspectionAborted = true;
+      inspector.kill();
+      emit inspectionResult(inspectionSerial,
+                            "Inspection output exceeded the safety limit. "
+                            "Reconnect the phone and retry.");
+    }
+  });
+  connect(&inspector, &QProcess::errorOccurred, this,
+          [this](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart) {
+              inspectionTimeout.stop();
+              inspectionAborted = true;
+              emit inspectionResult(
+                  inspectionSerial,
+                  "Could not start the bundled inspection engine. Reinstall "
+                  "the complete app bundle.");
+            }
+          });
+  connect(&inspector, &QProcess::finished, this,
+          [this](int code, QProcess::ExitStatus status) {
+            inspectionTimeout.stop();
+            if (inspectionAborted)
+              return;
+            inspectionOutput += inspector.readAllStandardOutput();
+            if (inspectionOutput.size() > 1024 * 1024) {
+              emit inspectionResult(
+                  inspectionSerial,
+                  "Inspection output exceeded the safety limit.");
+              return;
+            }
+            const auto output = QString::fromUtf8(inspectionOutput).trimmed();
+            emit inspectionResult(inspectionSerial,
+                                  code == 0 && status == QProcess::NormalExit &&
+                                          !output.isEmpty()
+                                      ? output
+                                      : "Inspection failed. Reconnect or "
+                                        "authorize the phone and retry.\n\n" +
+                                            output);
+          });
   windowCommandTimeout.setSingleShot(true);
   connect(&windowCommandTimeout, &QTimer::timeout, this, [this] {
     pendingWindowCommand = 0;
@@ -580,7 +702,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
 }
 
 Engine::~Engine() {
-  for (auto *process : {&scan, &wireless, &mirror, &deviceTask}) {
+  for (auto *process : {&scan, &wireless, &mirror, &deviceTask, &inspector}) {
     if (process->state() != QProcess::NotRunning) {
       if (process == &mirror)
         process->write("Q", 1);
@@ -610,9 +732,57 @@ void Engine::refresh() {
   scan.start(preferences.adb, {"devices", "-l"});
 }
 
+void Engine::inspectDevice(const QString &serial) {
+  if (running() || inspecting()) {
+    emit message("Finish the active session or inspection first.");
+    return;
+  }
+  if (!canUseDevice(serial))
+    return;
+  inspectionSerial = serial;
+  inspectionOutput.clear();
+  inspectionAborted = false;
+  emit inspectionResult(serial, "Inspecting displays and encoders…");
+  auto env = QProcessEnvironment::systemEnvironment();
+  env.remove("DROIDCAST_SESSION_TOKEN");
+  env.insert("ADB", executablePath(preferences.adb));
+  if (!preferences.server.isEmpty())
+    env.insert("SCRCPY_SERVER_PATH", preferences.server);
+  inspector.setProcessEnvironment(env);
+  inspectionTimeout.start(20000);
+  inspector.start(preferences.scrcpy,
+                  {"--serial=" + serial, "--list-displays", "--list-encoders"});
+}
+
+void Engine::cancelInspection() {
+  if (!inspecting())
+    return;
+  inspectionAborted = true;
+  inspectionTimeout.stop();
+  inspector.kill();
+  emit inspectionResult(
+      inspectionSerial,
+      "Inspection canceled. You can retry or start mirroring.");
+}
+
 bool Engine::start(const QString &serial, const QString &recording) {
   if (running())
     return false;
+  if (inspecting()) {
+    emit message(
+        "Wait for device inspection to finish or cancel it before mirroring.");
+    return false;
+  }
+  for (const auto &option : sessionOptions()) {
+    const auto error = textOptionError(
+        option.key,
+        normalizedOption(option, preferences.options.value(option.key))
+            .toString());
+    if (!error.isEmpty()) {
+      emit message(option.title + ": " + error);
+      return false;
+    }
+  }
   if (!recording.isEmpty() && recordingFormat(preferences) == "mp4" &&
       preferences.audio &&
       preferences.options.value("audio-codec").toString() == "raw") {
