@@ -42,6 +42,86 @@ private slots:
     applyTheme(*qobject_cast<QApplication *>(QCoreApplication::instance()));
   }
   void init() { qunsetenv("HUB_TEST_MODE"); }
+  void inputModesOnlyEmitCompatibleOptions() {
+    Preferences prefs;
+    prefs.options = {{"key-injection", "prefer-text"},
+                     {"no-key-repeat", true},
+                     {"no-mouse-hover", true},
+                     {"gamepad", "uhid"}};
+    auto args = mirrorArguments("PHONE123", prefs);
+    QVERIFY(args.contains("--prefer-text"));
+    QVERIFY(!args.contains("--raw-key-events"));
+    QVERIFY(args.contains("--no-key-repeat"));
+    QVERIFY(args.contains("--no-mouse-hover"));
+    QVERIFY(args.contains("--gamepad=uhid"));
+    prefs.options["key-injection"] = "raw-key-events";
+    args = mirrorArguments("PHONE123", prefs);
+    QVERIFY(args.contains("--raw-key-events"));
+    QVERIFY(!args.contains("--prefer-text"));
+    prefs.keyboard = prefs.mouse = "uhid";
+    args = mirrorArguments("PHONE123", prefs);
+    QVERIFY(!args.contains("--raw-key-events"));
+    QVERIFY(!args.contains("--no-key-repeat"));
+    QVERIFY(!args.contains("--no-mouse-hover"));
+    prefs.options["no-control"] = true;
+    QVERIFY(!mirrorArguments("PHONE123", prefs).contains("--gamepad=uhid"));
+    prefs.keyboard = prefs.mouse = "disabled";
+    QSettings settings(storage.filePath("inputs.ini"), QSettings::IniFormat);
+    prefs.save(settings);
+    const auto restored = Preferences::load(settings);
+    QCOMPARE(restored.keyboard, QString("disabled"));
+    QCOMPARE(restored.mouse, QString("disabled"));
+  }
+  void recordingOptionsOnlyApplyToRecordings() {
+    Preferences prefs;
+    prefs.options = {{"record-format", "mp4"},
+                     {"record-orientation", "90"},
+                     {"time-limit", 60}};
+    auto args = mirrorArguments("PHONE123", prefs);
+    QVERIFY(!args.contains("--record-format=mp4"));
+    QVERIFY(!args.contains("--record-orientation=90"));
+    QVERIFY(args.contains("--time-limit=60"));
+    QCOMPARE(recordingFormat(prefs), QString("mp4"));
+    args = mirrorArguments("PHONE123", prefs, "file.mp4");
+    QVERIFY(args.contains("--record-format=mp4"));
+    QVERIFY(args.contains("--record-orientation=90"));
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.options = prefs.options;
+    engine.preferences.options["audio-codec"] = "raw";
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy messages(&engine, &Engine::message);
+    QVERIFY(!engine.start("PHONE123", "file.mp4"));
+    QVERIFY(messages.last().first().toString().contains("MP4 cannot"));
+    QVERIFY(!engine.running());
+    engine.preferences.audio = false;
+    QVERIFY(engine.start("PHONE123", "file.mp4"));
+    engine.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
+  }
+  void inputWidgetsRespectModeAndReadOnly() {
+    QSettings settings;
+    auto prefs = bundledPreferences();
+    prefs.save(settings);
+    Window window;
+    QComboBox *keyboard = nullptr;
+    for (auto *combo : window.findChildren<QComboBox *>())
+      if (combo->accessibleName() == "Keyboard simulation")
+        keyboard = combo;
+    QVERIFY(keyboard);
+    auto *repeat = window.findChild<QCheckBox *>("option-no-key-repeat");
+    QVERIFY(repeat && repeat->isEnabled());
+    keyboard->setCurrentIndex(keyboard->findData("uhid"));
+    QVERIFY(!repeat->isEnabled());
+    keyboard->setCurrentIndex(keyboard->findData("sdk"));
+    QVERIFY(repeat->isEnabled());
+    auto *readOnly = window.findChild<QCheckBox *>("option-no-control");
+    readOnly->setChecked(true);
+    QVERIFY(!repeat->isEnabled());
+    QVERIFY(!window.findChild<QComboBox *>("option-gamepad")->isEnabled());
+    readOnly->setChecked(false);
+    QVERIFY(window.findChild<QComboBox *>("option-gamepad")->isEnabled());
+  }
   void lifecycleUsesFramesAndFinalizesRecording() {
     Engine engine;
     engine.preferences = bundledPreferences();

@@ -554,6 +554,7 @@ QWidget *Window::inputPage() {
     mode->setAccessibleName(pair.first);
     mode->addItem("Standard · SDK", "sdk");
     mode->addItem("Physical device · UHID", "uhid");
+    mode->addItem("Disabled", "disabled");
     mode->setCurrentIndex(mode->findData(engine.preferences.*pair.second));
     content->addWidget(mode);
     connect(mode, &QComboBox::currentIndexChanged, this,
@@ -563,6 +564,14 @@ QWidget *Window::inputPage() {
             });
     layout->addWidget(box);
   }
+  auto *advancedInput =
+      button("Advanced keyboard, mouse and gamepad settings", "settings");
+  connect(advancedInput, &QPushButton::clicked, this, [this] {
+    findChild<QLineEdit *>("settingsSearch")->clear();
+    findChild<QComboBox *>("settingsCategory")->setCurrentText("Keyboard");
+    showPage(5);
+  });
+  layout->addWidget(advancedInput);
   QVBoxLayout *keys;
   auto *keysCard = card(keys);
   keys->addWidget(label("Keyboard shortcuts", "section"));
@@ -598,8 +607,9 @@ QWidget *Window::settingsPage() {
   auto *categoryPicker = new QComboBox;
   categoryPicker->setObjectName("settingsCategory");
   categoryPicker->setAccessibleName("Configuration category");
-  categoryPicker->addItems(
-      {"All settings", "Video", "Audio", "Device", "Window", "Recording"});
+  categoryPicker->addItems({"All settings", "Video", "Audio", "Device",
+                            "Window", "Keyboard", "Mouse", "Gamepad",
+                            "Recording"});
   layout->addWidget(categoryPicker);
   auto *routes = new QHBoxLayout;
   auto *connectionRoute = button("Connection settings", "wifi");
@@ -691,8 +701,10 @@ QWidget *Window::settingsPage() {
                      "video resolution fps frame rate bitrate codec");
   behavior->setProperty("searchTerms",
                         "audio device behavior awake screen top");
-  for (const auto &category : {QString("Video"), QString("Audio"),
-                               QString("Device"), QString("Window")}) {
+  for (const auto &category :
+       {QString("Video"), QString("Audio"), QString("Device"),
+        QString("Window"), QString("Keyboard"), QString("Mouse"),
+        QString("Gamepad"), QString("Recording")}) {
     auto *group = new QGroupBox(category + " · advanced");
     auto *fields = new QFormLayout(group);
     fields->setSpacing(12);
@@ -701,6 +713,8 @@ QWidget *Window::settingsPage() {
       if (option.category != category)
         continue;
       terms += " " + option.key + " " + option.title + " " + option.help;
+      if (option.key == "key-injection")
+        terms += " --prefer-text --raw-key-events";
       const auto current = normalizedOption(
           option, engine.preferences.options.value(option.key));
       QWidget *control;
@@ -735,7 +749,10 @@ QWidget *Window::settingsPage() {
         control = spin;
       }
       control->setObjectName("option-" + option.key);
-      control->setToolTip(option.help + "\n--" + option.key);
+      control->setToolTip(option.help +
+                          (option.key == "key-injection"
+                               ? "\n--prefer-text / --raw-key-events"
+                               : "\n--" + option.key));
       field(fields, option.title, control);
       fields->addRow(label(option.help, "muted"));
     }
@@ -815,6 +832,9 @@ QWidget *Window::diagnosticsPage() {
 }
 void Window::savePreferences() {
   engine.preferences.save(settings);
+  for (const auto &option : sessionOptions())
+    if (auto *control = findChild<QWidget *>("option-" + option.key))
+      control->setEnabled(sessionOptionAvailable(option, engine.preferences));
   for (auto *check : findChildren<QCheckBox *>()) {
     const auto key = check->property("preference").toString();
     if (key.isEmpty())
@@ -966,7 +986,8 @@ void Window::launch(bool record) {
     if (!ensureCaptureDirectory())
       return;
     path =
-        QDir(engine.preferences.mediaDirectory).filePath(captureName(".mkv"));
+        QDir(engine.preferences.mediaDirectory)
+            .filePath(captureName("." + recordingFormat(engine.preferences)));
   }
   if (engine.start(serial, path))
     showPage(1);

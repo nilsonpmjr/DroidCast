@@ -33,7 +33,8 @@ into the desktop build.
 The build understands Linux x86_64, Windows x64, and macOS x86_64/arm64 runtime
 archives. Qt and engine development dependencies must be available on the build
 machine. For UI-only development, `-DDROIDCAST_BUILD_FORK=OFF` uses the verified
-upstream 4.1 engine from the bundle. `-DDROIDCAST_BUNDLE_RUNTIME=OFF` is for isolated
+upstream 4.1 engine from the bundle, without first-frame reporting or the private
+graceful-stop protocol; it is not suitable for release. `-DDROIDCAST_BUNDLE_RUNTIME=OFF` is for isolated
 tests only; that build is not a distributable app. `-DBUILD_TESTING=OFF` omits Qt Test.
 
 For multi-configuration generators add `--config Release`, then launch
@@ -56,18 +57,23 @@ Windows/macOS build paths have not yet been exercised.
 - **Connected devices:** illustrated first-connection guidance, automatic ADB
   discovery, device cards, authorization/USB-permission states, explicit device
   selection, quick session preferences, mirror and record actions.
-- **Active session:** elapsed process time, selected phone, recording destination,
-  screenshot capture, APK installation and stop control. The live video opens in
+- **Active session:** first-frame-backed lifecycle state, elapsed process time,
+  selected phone, recording destination, screenshot capture, APK installation,
+  Back/Home/Recents/Power/volume toolbar and graceful stop. The live video opens in
   a separate DroidCast mirror window; the workspace illustration is not a preview.
 - **Wireless pairing:** six-digit pairing code and separate pairing/connection
   addresses. Codes go through stdin and are never saved.
 - **Recordings & captures:** actual local PNG, MKV and MP4 files, type filters,
   sizes/dates, open folder and open capture. An active recording cannot be opened
   until the session ends.
-- **Input & controls:** SDK/UHID keyboard and mouse choices, accurate shortcut
-  reference using scrcpy's default left Alt / left Super modifier.
-- **Settings:** resolution, FPS cap, bitrate, video codec, audio, screen behavior
-  and capture directory. Settings apply to the next session and persist locally.
+- **Input & controls:** SDK/UHID/disabled keyboard and mouse choices, accurate
+  shortcut reference using scrcpy's default left Alt / left Super modifier, and
+  a route to advanced input settings including UHID gamepad forwarding.
+- **Settings:** searchable categories for video, audio, device, window, keyboard,
+  mouse, gamepad and recording. Includes read-only mode, buffering, orientation,
+  SDK input preferences, MKV/MP4 recording, recording rotation and session time
+  limit. Settings apply to the next session and persist locally. Options that do
+  not apply to the chosen input mode are inactive, but their saved values remain.
 - **Diagnostics:** bounded in-memory output from the engine and device services.
 
 Recordings go directly to the chosen capture directory (default: Videos/DroidCast)
@@ -75,17 +81,19 @@ with unique filenames. Screenshots are validated as PNG before atomic saving. AP
 installation runs only after choosing a file; an install failure is reported even
 if ADB exits with code zero. There is no pretend battery, latency or device data.
 
-Close the mirror window to finish recordings cleanly. Stop requests process
-termination and kills an unresponsive process after five seconds. Especially on
-Windows, forced termination can leave a recording incomplete. A process starting
-is not proof that streaming has begun; connection errors appear in Diagnostics.
+Close the mirror window or use Stop to request normal engine cleanup. The fork
+reports recorder finalization separately from process completion. An unresponsive
+process is killed after five seconds and the app warns that recordings may be
+incomplete. Streaming is reported only after the first video frame, not merely
+process startup. See [the private bridge documentation](BRIDGE.md).
 
 ## Verification and visual review
 
 Tests cover device parsing and states, argument boundaries, wireless validation,
 settings persistence, no automatic mirroring, process failures/timeouts, pairing,
 valid/invalid screenshot handling, APK results, synchronized preference switches,
-and absence of executable-path settings. Tests use a compiled helper and temporary
+input-mode compatibility, recording validation, first-frame lifecycle, graceful
+stop/finalization, disconnects, and absence of executable-path settings. Tests use a compiled helper and temporary
 runtime; no connected phone is required and no fake devices enter the product.
 
 ```sh

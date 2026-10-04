@@ -30,6 +30,9 @@ struct Preferences {
   void save(QSettings &settings) const;
 };
 
+bool sessionOptionAvailable(const SessionOption &option,
+                            const Preferences &prefs);
+QString recordingFormat(const Preferences &prefs);
 QList<Device> parseDevices(const QString &output);
 QStringList mirrorArguments(const QString &serial, const Preferences &prefs,
                             const QString &recording = {});

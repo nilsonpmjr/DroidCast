@@ -46,3 +46,21 @@ fake-process tests. Windows and macOS are not verified by this Linux build.
 
 See `desktop/BRIDGE.md` for the protocol and limitations. The phone toolbar still
 uses ADB; this bridge currently carries lifecycle events and quit only.
+
+## Part 3: input modes and recording preferences
+
+- Keyboard and mouse now support Disabled as well as SDK and UHID modes.
+- Added exclusive SDK key-injection choices (default, prefer text, raw events),
+  key-repeat suppression, mouse-hover suppression and UHID gamepad forwarding.
+- SDK-only controls become inactive for other input modes, and read-only disables
+  advanced input options. Saved inactive choices are not passed to the engine.
+  AOA/OTG remains outside this slice because its platform and transport rules
+  need their own implementation.
+- Added MKV/MP4 recording container selection with matching generated filenames,
+  independent recording rotation, and a time limit applying to the whole session.
+  Container and rotation arguments are emitted only for recording launches.
+- Reject MP4 plus raw audio before starting, with actionable feedback. Audio-only
+  containers and no-playback recording modes remain planned.
+- Added tests for mode compatibility, argument isolation, disabled-mode
+  persistence, recording validation and UI enablement. Hardware gamepad and
+  recording-format checks remain required.

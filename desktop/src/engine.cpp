@@ -12,6 +12,55 @@
 
 const QList<SessionOption> &sessionOptions() {
   static const QList<SessionOption> options{
+      {"key-injection",
+       "Keyboard",
+       "Key injection",
+       "SDK keyboard only. Prefer text helps typing; raw events suit games. "
+       "Saved but inactive in other input modes.",
+       "default",
+       {"default", "prefer-text", "raw-key-events"}},
+      {"no-key-repeat",
+       "Keyboard",
+       "Disable key repeat",
+       "SDK keyboard only. Do not forward repeated key-down events.",
+       false,
+       {}},
+      {"no-mouse-hover",
+       "Mouse",
+       "Disable mouse hover",
+       "SDK mouse only. Send pointer movement only while clicking or dragging.",
+       false,
+       {}},
+      {"gamepad",
+       "Gamepad",
+       "Gamepad forwarding",
+       "UHID simulates a physical gamepad on Android. Requires phone UHID "
+       "support; disabled in read-only mode.",
+       "disabled",
+       {"disabled", "uhid"}},
+      {"record-format",
+       "Recording",
+       "Recording container",
+       "MKV is flexible; MP4 is widely supported. MP4 cannot contain raw "
+       "audio. Applies only when recording.",
+       "mkv",
+       {"mkv", "mp4"}},
+      {"record-orientation",
+       "Recording",
+       "Recording rotation",
+       "Rotate the saved video independently of the mirror window. Applies "
+       "only when recording.",
+       "0",
+       {"0", "90", "180", "270"}},
+      {"time-limit",
+       "Recording",
+       "Session time limit (seconds)",
+       "Zero means unlimited. Ends the entire session, including mirroring "
+       "without recording, through normal cleanup.",
+       0,
+       {},
+       0,
+       86400},
       {"video-buffer",
        "Video",
        "Video buffer (ms)",
@@ -103,6 +152,23 @@ const QList<SessionOption> &sessionOptions() {
   return options;
 }
 
+bool sessionOptionAvailable(const SessionOption &option, const Preferences &p) {
+  const bool readOnly = p.options.value("no-control", false).toBool();
+  if (option.category == "Keyboard")
+    return !readOnly && p.keyboard == "sdk";
+  if (option.category == "Mouse")
+    return !readOnly && p.mouse == "sdk";
+  if (option.category == "Gamepad")
+    return !readOnly;
+  if (option.category == "Audio")
+    return p.audio;
+  return true;
+}
+
+QString recordingFormat(const Preferences &p) {
+  return p.options.value("record-format").toString() == "mp4" ? "mp4" : "mkv";
+}
+
 QVariant normalizedOption(const SessionOption &option, const QVariant &value) {
   if (!value.isValid())
     return option.initial;
@@ -122,10 +188,10 @@ Preferences Preferences::load(QSettings &s) {
   p.fps = qBound(1, s.value("session/fps", p.fps).toInt(), 240);
   p.bitrate = qBound(1, s.value("session/bitrate", p.bitrate).toInt(), 200);
   p.keyboard = s.value("session/keyboard", p.keyboard).toString();
-  if (p.keyboard != "sdk" && p.keyboard != "uhid")
+  if (p.keyboard != "sdk" && p.keyboard != "uhid" && p.keyboard != "disabled")
     p.keyboard = "sdk";
   p.mouse = s.value("session/mouse", p.mouse).toString();
-  if (p.mouse != "sdk" && p.mouse != "uhid")
+  if (p.mouse != "sdk" && p.mouse != "uhid" && p.mouse != "disabled")
     p.mouse = "sdk";
   p.codec = s.value("session/codec", p.codec).toString();
   if (!QStringList{"h264", "h265", "av1"}.contains(p.codec))
@@ -213,6 +279,20 @@ QStringList mirrorArguments(const QString &serial, const Preferences &p,
   }
   for (const auto &option : sessionOptions()) {
     const auto value = normalizedOption(option, p.options.value(option.key));
+    if (!sessionOptionAvailable(option, p))
+      continue;
+    if (option.key == "record-format") {
+      if (!recording.isEmpty())
+        args << "--record-format=" + recordingFormat(p);
+      continue;
+    }
+    if (option.key == "record-orientation" && recording.isEmpty())
+      continue;
+    if (option.key == "key-injection") {
+      if (value != option.initial)
+        args << "--" + value.toString();
+      continue;
+    }
     if (value == option.initial)
       continue;
     if (!p.audio && option.category == "Audio")
@@ -521,6 +601,13 @@ void Engine::refresh() {
 bool Engine::start(const QString &serial, const QString &recording) {
   if (running())
     return false;
+  if (!recording.isEmpty() && recordingFormat(preferences) == "mp4" &&
+      preferences.audio &&
+      preferences.options.value("audio-codec").toString() == "raw") {
+    emit message("MP4 cannot contain raw audio. Choose MKV, another audio "
+                 "codec, or disable audio forwarding.");
+    return false;
+  }
   bool authorized = false;
   for (const auto &device : devices)
     if (device.serial == serial && device.ready())
