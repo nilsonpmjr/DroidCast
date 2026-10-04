@@ -106,7 +106,7 @@ This advances ticket 16. Reset-video and other live Android actions remain plann
   still require hardware verification.
 
 This advances ticket 17. Camera, virtual display, encoder-specific codec options
-and automatic capability-driven selectors remain future slices.
+and automatic capability-driven selectors were future slices at this checkpoint.
 
 ## Part 6: virtual-display sessions
 
@@ -130,3 +130,31 @@ and automatic capability-driven selectors remain future slices.
   read-only compatibility, targeting guards and UI dependencies. Full desktop tests
   pass on Linux. Android 10+ virtual-display creation, app behavior and recording
   on hardware still need verification; this does not close ticket 20's release gate.
+
+## Part 7: camera-capture sessions
+
+- Added a Camera settings category and explicit display/camera source selection.
+  Android 12+ camera sessions support exact ID or facing, exact size or aspect
+  ratio, frame rate, high-speed mode, startup torch and initial zoom.
+- Added progressive dependencies for mutually exclusive settings. Exact IDs
+  suppress facing; exact sizes suppress the general resolution limit and aspect
+  ratio; display-only, virtual-display and advanced input settings become inactive
+  in camera mode. Saved inactive choices remain available for later display sessions.
+- Changed audio source to an explicit Auto default, matching scrcpy: display
+  capture defaults to device output and camera capture defaults to the microphone.
+  Choosing output/playback/mic still produces an explicit override.
+- Extended idle device inspection with `--list-camera-sizes`. The same bounded,
+  target-specific report now contains displays, encoders, cameras, declared sizes
+  and rates. The UI warns that Android camera declarations may be inaccurate.
+- Added format and range validation for camera IDs, sizes, aspect ratios and zoom.
+  High-speed capture without an explicit frame rate is rejected before launch.
+- Snapshot camera mode at launch. ADB screenshots and phone-toolbar key events are
+  disabled for the active camera session instead of silently targeting the phone
+  display; recording and host mirror-window controls remain available.
+- Verification covers emitted and suppressed arguments, invalid/inactive values,
+  dependent widget states, combined inspection output and launch-time targeting
+  guards. Linux automated tests do not prove camera availability or supported
+  size/rate combinations; Android 12+ hardware testing remains required.
+
+This advances ticket 21. Live torch/zoom controls, automatic structured camera
+selectors and physical-device compatibility testing remain future work.

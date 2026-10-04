@@ -652,8 +652,8 @@ QWidget *Window::settingsPage() {
   auto *categoryPicker = new QComboBox;
   categoryPicker->setObjectName("settingsCategory");
   categoryPicker->setAccessibleName("Configuration category");
-  categoryPicker->addItems({"All settings", "Video", "Audio", "Device",
-                            "Window", "Keyboard", "Mouse", "Gamepad",
+  categoryPicker->addItems({"All settings", "Video", "Camera", "Audio",
+                            "Device", "Window", "Keyboard", "Mouse", "Gamepad",
                             "Recording", "Virtual display"});
   layout->addWidget(categoryPicker);
   auto *routes = new QHBoxLayout;
@@ -671,6 +671,8 @@ QWidget *Window::settingsPage() {
   form->setSpacing(14);
   form->setFieldGrowthPolicy(QFormLayout::FieldsStayAtSizeHint);
   auto *size = new QComboBox;
+  size->setObjectName("base-max-size");
+  size->setAccessibleName("Video resolution limit");
   size->addItem("Original resolution", 0);
   for (int v : {720, 1080, 1440, 1920})
     size->addItem(QString::number(v) + " px maximum dimension", v);
@@ -747,9 +749,10 @@ QWidget *Window::settingsPage() {
   behavior->setProperty("searchTerms",
                         "audio device behavior awake screen top");
   for (const auto &category :
-       {QString("Video"), QString("Audio"), QString("Device"),
-        QString("Window"), QString("Keyboard"), QString("Mouse"),
-        QString("Gamepad"), QString("Recording"), QString("Virtual display")}) {
+       {QString("Video"), QString("Camera"), QString("Audio"),
+        QString("Device"), QString("Window"), QString("Keyboard"),
+        QString("Mouse"), QString("Gamepad"), QString("Recording"),
+        QString("Virtual display")}) {
     auto *group = new QGroupBox(category + " · advanced");
     auto *fields = new QFormLayout(group);
     fields->setSpacing(12);
@@ -833,12 +836,18 @@ QWidget *Window::settingsPage() {
         fields->addRow(validation);
       fields->addRow(label(option.help, "muted"));
     }
-    if (category == "Video") {
-      terms +=
-          " inspect resources displays encoders list-displays list-encoders";
-      auto *inspect = button("Inspect selected phone", "phone");
+    if (category == "Video" || category == "Camera") {
+      const bool cameraReport = category == "Camera";
+      terms += cameraReport
+                   ? " inspect camera sizes rates list-cameras "
+                     "list-camera-sizes"
+                   : " inspect resources displays encoders list-displays "
+                     "list-encoders";
+      auto *inspect = button(cameraReport ? "Inspect phone cameras"
+                                          : "Inspect selected phone",
+                             "phone");
       inspect->setProperty("inspectDevice", true);
-      inspect->setObjectName("inspectDevice");
+      inspect->setObjectName(cameraReport ? "inspectCamera" : "inspectDevice");
       auto *cancel = button("Cancel inspection");
       cancel->setProperty("cancelInspection", true);
       auto *actions = new QHBoxLayout;
@@ -846,16 +855,26 @@ QWidget *Window::settingsPage() {
       actions->addWidget(cancel);
       fields->addRow(actions);
       auto *report = new QPlainTextEdit;
-      report->setObjectName("deviceCapabilities");
-      report->setAccessibleName("Selected phone displays and encoders report");
+      report->setObjectName(cameraReport ? "cameraCapabilities"
+                                         : "deviceCapabilities");
+      report->setAccessibleName(cameraReport
+                                    ? "Selected phone cameras report"
+                                    : "Selected phone displays and encoders "
+                                      "report");
       report->setReadOnly(true);
       report->setMaximumBlockCount(1000);
       report->setMinimumHeight(160);
-      report->setPlainText(
-          "Select an authorized phone in Connected devices, then inspect it "
-          "while no mirror is running. Copy a display ID or matching encoder "
-          "name into the fields above. Listed resources may change after "
-          "reconnecting.");
+      report->setPlainText(cameraReport
+                               ? "Select an authorized Android 12+ phone, then "
+                                 "inspect it while no mirror is running. Copy "
+                                 "a camera ID, size and supported frame rate "
+                                 "into the fields above. Android's declared "
+                                 "combinations may be incomplete or inaccurate."
+                               : "Select an authorized phone in Connected "
+                                 "devices, then inspect it while no mirror is "
+                                 "running. Copy a display ID or matching "
+                                 "encoder name into the fields above. Listed "
+                                 "resources may change after reconnecting.");
       fields->addRow(report);
       connect(inspect, &QPushButton::clicked, this,
               [this] { engine.inspectDevice(selectedSerial()); });
@@ -957,6 +976,20 @@ void Window::savePreferences() {
           QMetaObject::invokeMethod(edit, "editingFinished",
                                     Qt::DirectConnection);
     }
+  if (auto *size = findChild<QComboBox *>("base-max-size")) {
+    const bool exactCameraSize =
+        engine.preferences.options.value("video-source", "display")
+                .toString() == "camera" &&
+        !engine.preferences.options.value("camera-size")
+             .toString()
+             .trimmed()
+             .isEmpty();
+    size->setEnabled(!exactCameraSize);
+    size->setToolTip(exactCameraSize
+                         ? "Exact camera size replaces this resolution limit."
+                         : "Maximum captured video dimension; zero keeps the "
+                           "original resolution.");
+  }
   for (auto *check : findChildren<QCheckBox *>()) {
     const auto key = check->property("preference").toString();
     if (key.isEmpty())
@@ -1099,7 +1132,12 @@ void Window::updateActions() {
       running
           ? engine.sessionStateText() + " · " + engine.activeSerial +
                 "\n\nYour live display opens in a separate DroidCast window. " +
-                (engine.usesAlternateDisplay()
+                (engine.cameraSession()
+                     ? "Camera capture: Android display commands and toolbar "
+                       "screenshots are unavailable; use session recording "
+                       "for the camera stream. Mirror-window controls remain "
+                       "available."
+                 : engine.usesAlternateDisplay()
                      ? "Secondary/virtual display: use input inside the "
                        "mirror. Phone-toolbar commands and screenshots are "
                        "unavailable for this display; recording remains "

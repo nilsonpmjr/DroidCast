@@ -72,8 +72,9 @@ Windows/macOS build paths have not yet been exercised.
 - **Input & controls:** SDK/UHID/disabled keyboard and mouse choices, accurate
   shortcut reference using scrcpy's default left Alt / left Super modifier, and
   a route to advanced input settings including UHID gamepad forwarding.
-- **Settings:** searchable categories for video, audio, device, window, keyboard,
-  mouse, gamepad and recording. Includes read-only mode, buffering, orientation,
+- **Settings:** searchable categories for video, camera, audio, device, window,
+  keyboard, mouse, gamepad, recording and virtual displays. Includes read-only
+  mode, buffering, orientation,
   SDK input preferences, MKV/MP4 recording, recording rotation and session time
   limit. Settings apply to the next session and persist locally. Options that do
   not apply to the chosen input mode are inactive, but their saved values remain.
@@ -87,6 +88,11 @@ Windows/macOS build paths have not yet been exercised.
   no search or force-stop prefix is accepted. Some phones have no launcher there,
   so leaving the package empty may produce no video. These changes take effect
   only after explicitly starting a session.
+  The **Camera** category adds Android 12+ camera capture with source, exact ID or
+  facing, exact size or aspect ratio, frame rate, high-speed mode, torch and zoom.
+  Dependent controls prevent combinations rejected by scrcpy. Inspect an idle
+  phone to list its declared cameras, sizes and rates; Android camera declarations
+  may still be incomplete or inaccurate, so hardware remains the final check.
 - **Diagnostics:** bounded in-memory output from the engine and device services.
 
 Recordings go directly to the chosen capture directory (default: Videos/DroidCast)
@@ -97,6 +103,8 @@ if ADB exits with code zero. There is no pretend battery, latency or device data
 Phone-toolbar commands and ADB screenshots currently target the primary display.
 They are disabled for an active secondary/virtual display so they cannot silently
 act on the wrong screen. Use input inside the mirror and session recording there.
+They are also disabled for active camera capture, because neither route targets
+the camera stream. Use session recording to save camera video.
 Host-window controls remain available; in flexible-display mode, resizing also
 changes Android's display. Read-only mode disables flexible resizing and app
 launch, but creating an explicitly selected virtual display still occurs.
@@ -134,6 +142,7 @@ secondary text, `#245bc2` actions and `#91bbff` focus. Native platform title bar
 vector icons, keyboard-operable switches and constrained content widths keep the
 layout usable across desktop sizes. The original TS project remains untouched.
 
-Next: validate with physical devices; add engine IPC for graceful shutdown and
-reliable streaming events; integrate live video into the workspace; add per-device
-profiles and concurrent sessions; then finish standalone platform installers.
+Next: validate display, virtual-display and camera sessions with physical devices;
+expand the private engine bridge with live camera tools and Android control-channel
+actions; integrate live video into the workspace; add per-device profiles and
+concurrent sessions; then finish standalone platform installers.

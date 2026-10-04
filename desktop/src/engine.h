@@ -65,8 +65,10 @@ public:
   bool usesAlternateDisplay() const {
     return running() && activeAlternateDisplay;
   }
+  bool cameraSession() const { return running() && activeCamera; }
   bool captureAllowed(const QString &serial) const {
-    return !usesAlternateDisplay() || serial != activeSerial;
+    return (!usesAlternateDisplay() && !cameraSession()) ||
+           serial != activeSerial;
   }
   enum class WindowAction {
     Fullscreen,
@@ -125,7 +127,8 @@ private:
   QByteArray deviceOutput;
   QString capturePath;
   bool commandTask = false, activeReadOnly = false;
-  bool activeAlternateDisplay = false, activeFlexibleDisplay = false;
+  bool activeAlternateDisplay = false, activeFlexibleDisplay = false,
+       activeCamera = false;
   bool deviceTimedOut = false;
   bool canUseDevice(const QString &serial);
   bool stopping = false, scanTimedOut = false, wirelessTimedOut = false;

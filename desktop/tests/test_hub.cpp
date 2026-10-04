@@ -47,6 +47,129 @@ private slots:
     applyTheme(*qobject_cast<QApplication *>(QCoreApplication::instance()));
   }
   void init() { qunsetenv("HUB_TEST_MODE"); }
+  void cameraArgumentsValidationAndDependencies() {
+    Preferences prefs;
+    prefs.size = 1080;
+    prefs.options = {{"video-source", "camera"},  {"camera-id", "0"},
+                     {"camera-facing", "front"},  {"camera-size", "1920x1080"},
+                     {"camera-ar", "16:9"},       {"camera-fps", 120},
+                     {"camera-high-speed", true}, {"camera-torch", true},
+                     {"camera-zoom", "2.5"}};
+    auto args = mirrorArguments("PHONE123", prefs);
+    for (const auto &flag :
+         {"--video-source=camera", "--camera-id=0", "--camera-size=1920x1080",
+          "--camera-fps=120", "--camera-high-speed", "--camera-torch",
+          "--camera-zoom=2.5"})
+      QVERIFY(args.contains(flag));
+    QVERIFY(!args.contains("--camera-facing=front"));
+    QVERIFY(!args.contains("--camera-ar=16:9"));
+    QVERIFY(!args.contains("--max-size=1080"));
+    QVERIFY(!args.join(' ').contains("virtual-display"));
+    QVERIFY(sessionIssue(prefs).message.isEmpty());
+
+    prefs.options["camera-id"] = "";
+    prefs.options["camera-size"] = "";
+    args = mirrorArguments("PHONE123", prefs);
+    QVERIFY(args.contains("--camera-facing=front"));
+    QVERIFY(args.contains("--camera-ar=16:9"));
+    QVERIFY(args.contains("--max-size=1080"));
+    prefs.options["camera-fps"] = 0;
+    QCOMPARE(sessionIssue(prefs).key, QString("camera-fps"));
+    prefs.options["camera-high-speed"] = false;
+    for (const auto pair :
+         {qMakePair(QString("camera-id"), QString("front camera")),
+          qMakePair(QString("camera-size"), QString("1920 by 1080")),
+          qMakePair(QString("camera-ar"), QString("16/9")),
+          qMakePair(QString("camera-zoom"), QString("zero"))}) {
+      prefs.options[pair.first] = pair.second;
+      QCOMPARE(sessionIssue(prefs).key, pair.first);
+      prefs.options[pair.first] = "";
+    }
+    for (const auto value : {"sensor", "16:9", "1.7778", "0.5"})
+      QVERIFY2(textOptionError("camera-ar", value).isEmpty(), value);
+    prefs.options["video-source"] = "display";
+    prefs.options["camera-size"] = "invalid but inactive";
+    prefs.options["camera-zoom"] = "also invalid";
+    QVERIFY(sessionIssue(prefs).message.isEmpty());
+    args = mirrorArguments("PHONE123", prefs);
+    QVERIFY(!args.join(' ').contains("camera-"));
+    QVERIFY(!args.join(' ').contains("video-source"));
+    prefs.options["audio-source"] = "output";
+    QVERIFY(
+        mirrorArguments("PHONE123", prefs).contains("--audio-source=output"));
+    QSettings legacy(storage.filePath("pre-camera.ini"), QSettings::IniFormat);
+    legacy.setValue("options/audio-source", "output");
+    QCOMPARE(Preferences::load(legacy).options.value("audio-source").toString(),
+             QString("auto"));
+  }
+  void cameraSessionGuardsStayPinnedToTheSession() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.options["video-source"] = "camera";
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"},
+                      {"OTHER", "device", "Other", "USB"}};
+    QSignalSpy messages(&engine, &Engine::message);
+    QVERIFY(engine.start("PHONE123"));
+    QVERIFY(engine.cameraSession());
+    QVERIFY(!engine.captureAllowed("PHONE123"));
+    QVERIFY(engine.captureAllowed("OTHER"));
+    engine.preferences.options["video-source"] = "display";
+    QVERIFY(engine.cameraSession());
+    engine.phoneAction("PHONE123", Engine::PhoneAction::Home);
+    QVERIFY(!engine.deviceBusy());
+    QVERIFY(messages.last().first().toString().contains("camera capture"));
+    const auto capture = storage.filePath("wrong-camera-source.png");
+    engine.capture("PHONE123", capture);
+    QVERIFY(!engine.deviceBusy());
+    QVERIFY(!QFileInfo::exists(capture));
+    QVERIFY(messages.last().first().toString().contains("camera stream"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+    QVERIFY(!engine.cameraSession());
+    QVERIFY(engine.captureAllowed("PHONE123"));
+  }
+  void cameraControlsFollowTheSelectedSource() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(5);
+    auto *category = window.findChild<QComboBox *>("settingsCategory");
+    QVERIFY(category && category->findText("Camera") >= 0);
+    category->setCurrentText("Camera");
+    auto *source = window.findChild<QComboBox *>("option-video-source");
+    auto *id = window.findChild<QLineEdit *>("option-camera-id");
+    auto *facing = window.findChild<QComboBox *>("option-camera-facing");
+    auto *size = window.findChild<QLineEdit *>("option-camera-size");
+    auto *aspect = window.findChild<QLineEdit *>("option-camera-ar");
+    auto *maxSize = window.findChild<QComboBox *>("base-max-size");
+    auto *virtualDisplay =
+        window.findChild<QCheckBox *>("option-virtual-display");
+    auto *keyboard = window.findChild<QCheckBox *>("option-no-key-repeat");
+    QVERIFY(source && id && facing && size && aspect && maxSize &&
+            virtualDisplay && keyboard);
+    QCOMPARE(source->currentText(), QString("display"));
+    QVERIFY(!id->isEnabled());
+    source->setCurrentText("camera");
+    QVERIFY(id->isEnabled());
+    QVERIFY(facing->isEnabled());
+    QVERIFY(!virtualDisplay->isEnabled());
+    QVERIFY(!keyboard->isEnabled());
+    id->setText("0");
+    QVERIFY(!facing->isEnabled());
+    size->setText("1920x1080");
+    QVERIFY(!aspect->isEnabled());
+    QVERIFY(!maxSize->isEnabled());
+    size->setText("bad");
+    QMetaObject::invokeMethod(size, "editingFinished", Qt::DirectConnection);
+    QVERIFY(!window.findChild<QLabel *>("error-camera-size")->isHidden());
+    source->setCurrentText("display");
+    QVERIFY(virtualDisplay->isEnabled());
+    QVERIFY(maxSize->isEnabled());
+    QVERIFY(window.findChild<QLabel *>("error-camera-size")->isHidden());
+    bundledPreferences().save(settings);
+  }
   void virtualDisplayArgumentsAndValidation() {
     Preferences prefs;
     prefs.options = {{"new-display", "1920x1080/240"},
@@ -222,8 +345,10 @@ private slots:
     QTRY_VERIFY_WITH_TIMEOUT(!engine.inspecting(), 3000);
     QCOMPARE(results.last()[0].toString(), QString("PHONE123"));
     QVERIFY(results.last()[1].toString().contains(
-        "--serial=PHONE123|--list-displays|--list-encoders"));
+        "--serial=PHONE123|--list-displays|--list-encoders|"
+        "--list-camera-sizes"));
     QVERIFY(results.last()[1].toString().contains("c2.android.avc.encoder"));
+    QVERIFY(results.last()[1].toString().contains("--camera-id=0"));
     QVERIFY(!engine.running());
     QCOMPARE(engine.sessionState(), Engine::SessionState::Idle);
     qputenv("HUB_TEST_MODE", "inspect-hang");
@@ -287,6 +412,11 @@ private slots:
     auto *report = window.findChild<QPlainTextEdit *>("deviceCapabilities");
     QTRY_VERIFY(report->toPlainText().contains("c2.android.avc.encoder"));
     QVERIFY(report->toPlainText().startsWith("Device: PHONE123"));
+    auto *cameraReport =
+        window.findChild<QPlainTextEdit *>("cameraCapabilities");
+    QVERIFY(cameraReport);
+    QTRY_VERIFY(cameraReport->toPlainText().contains("--camera-id=0"));
+    QVERIFY(window.findChild<QPushButton *>("inspectCamera"));
     bundledPreferences().save(settings);
   }
   void windowToolbarIsLabelledAndRespondsToEngine() {

@@ -12,6 +12,71 @@
 
 const QList<SessionOption> &sessionOptions() {
   static const QList<SessionOption> options{
+      {"video-source",
+       "Camera",
+       "Video source",
+       "Mirror the Android display, or stream a phone camera on Android 12+. "
+       "Camera sessions do not accept keyboard, mouse or gamepad input.",
+       "display",
+       {"display", "camera"}},
+      {"camera-id",
+       "Camera",
+       "Exact camera ID",
+       "Optional ID from the camera report. When set, it takes priority over "
+       "camera facing.",
+       QString(""),
+       {}},
+      {"camera-facing",
+       "Camera",
+       "Preferred camera facing",
+       "Choose front, back or external when no exact camera ID is set. Auto "
+       "lets the engine choose.",
+       "auto",
+       {"auto", "front", "back", "external"}},
+      {"camera-size",
+       "Camera",
+       "Exact camera size",
+       "Optional WIDTHxHEIGHT from the camera report. When set, it replaces "
+       "the general resolution limit and takes priority over aspect ratio.",
+       QString(""),
+       {}},
+      {"camera-ar",
+       "Camera",
+       "Camera aspect ratio",
+       "Optional ratio such as 16:9, 1.7778 or sensor. Inactive when an exact "
+       "camera size is set.",
+       QString(""),
+       {}},
+      {"camera-fps",
+       "Camera",
+       "Camera frame rate",
+       "Zero lets the camera choose. High-speed capture requires an exact "
+       "supported frame rate from the camera report.",
+       0,
+       {},
+       0,
+       1000},
+      {"camera-high-speed",
+       "Camera",
+       "High-speed camera capture",
+       "Requires an exact supported size and frame rate combination from the "
+       "camera report.",
+       false,
+       {}},
+      {"camera-torch",
+       "Camera",
+       "Start with torch enabled",
+       "Turn on the selected camera's torch when the session starts, if the "
+       "camera supports it.",
+       false,
+       {}},
+      {"camera-zoom",
+       "Camera",
+       "Initial camera zoom",
+       "Optional positive zoom factor such as 2 or 1.5. Supported ranges vary "
+       "by camera.",
+       QString(""),
+       {}},
       {"virtual-display",
        "Virtual display",
        "Create a virtual display",
@@ -178,10 +243,11 @@ const QList<SessionOption> &sessionOptions() {
       {"audio-source",
        "Audio",
        "Audio source",
-       "Output requires Android 11+. Playback requires Android 13+; apps may "
-       "opt out. Microphone captures the phone microphone.",
-       "output",
-       {"output", "playback", "mic"}},
+       "Auto uses device output for display mirroring and the microphone for "
+       "camera capture. Output requires Android 11+. Playback requires Android "
+       "13+; apps may opt out.",
+       "auto",
+       {"auto", "output", "playback", "mic"}},
       {"audio-buffer",
        "Audio",
        "Audio buffer (ms)",
@@ -248,10 +314,26 @@ const QList<SessionOption> &sessionOptions() {
 
 bool sessionOptionAvailable(const SessionOption &option, const Preferences &p) {
   const bool readOnly = p.options.value("no-control", false).toBool();
+  const bool camera =
+      p.options.value("video-source", "display").toString() == "camera";
   const bool virtualDisplay =
-      p.options.value("virtual-display", false).toBool();
-  if (option.key == "virtual-display")
+      !camera && p.options.value("virtual-display", false).toBool();
+  if (option.key == "video-source")
     return true;
+  if (option.category == "Camera") {
+    if (!camera)
+      return false;
+    if (option.key == "camera-facing")
+      return p.options.value("camera-id").toString().trimmed().isEmpty();
+    if (option.key == "camera-ar")
+      return p.options.value("camera-size").toString().trimmed().isEmpty();
+    return true;
+  }
+  if (option.key == "virtual-display")
+    return !camera;
+  if (camera && (option.key == "crop" || option.key == "display-id" ||
+                 option.key == "display-ime-policy"))
+    return false;
   if (option.key == "display-ime-policy")
     return virtualDisplay || p.options.value("display-id", 0).toInt() > 0;
   if (option.category == "Virtual display")
@@ -259,11 +341,11 @@ bool sessionOptionAvailable(const SessionOption &option, const Preferences &p) {
            (!(option.key == "flex-display" || option.key == "start-app") ||
             !readOnly);
   if (option.category == "Keyboard")
-    return !readOnly && p.keyboard == "sdk";
+    return !camera && !readOnly && p.keyboard == "sdk";
   if (option.category == "Mouse")
-    return !readOnly && p.mouse == "sdk";
+    return !camera && !readOnly && p.mouse == "sdk";
   if (option.category == "Gamepad")
-    return !readOnly;
+    return !camera && !readOnly;
   if (option.category == "Audio")
     return p.audio;
   return true;
@@ -291,7 +373,50 @@ QVariant normalizedOption(const SessionOption &option, const QVariant &value) {
 QString textOptionError(const QString &key, const QString &value) {
   if (value.isEmpty())
     return {};
-  if (key == "new-display") {
+  if (key == "camera-id") {
+    if (value.size() > 128 ||
+        !QRegularExpression("\\A[A-Za-z0-9_.:-]+\\z").match(value).hasMatch())
+      return "Use a camera ID from the phone report (letters, numbers, dots, "
+             "underscores, colons or hyphens), or leave empty.";
+  } else if (key == "camera-size") {
+    static const QRegularExpression pattern("\\A([0-9]{1,5})x([0-9]{1,5})\\z");
+    const auto match = pattern.match(value);
+    const bool valid = match.hasMatch() && match.captured(1).toInt() > 0 &&
+                       match.captured(1).toInt() <= 65535 &&
+                       match.captured(2).toInt() > 0 &&
+                       match.captured(2).toInt() <= 65535;
+    if (!valid)
+      return "Use WIDTHxHEIGHT with values from 1–65535, or leave empty.";
+  } else if (key == "camera-ar") {
+    bool valid = value == "sensor";
+    if (!valid && value.contains(':')) {
+      static const QRegularExpression ratio("\\A([0-9]{1,5}):([0-9]{1,5})\\z");
+      const auto match = ratio.match(value);
+      valid = match.hasMatch() && match.captured(1).toInt() > 0 &&
+              match.captured(1).toInt() <= 10000 &&
+              match.captured(2).toInt() > 0 &&
+              match.captured(2).toInt() <= 10000;
+    } else if (!valid) {
+      bool ok = false;
+      const double aspect = value.toDouble(&ok);
+      valid = ok && aspect > 0 && aspect <= 10000 &&
+              QRegularExpression("\\A[0-9]+(?:\\.[0-9]+)?\\z")
+                  .match(value)
+                  .hasMatch();
+    }
+    if (!valid)
+      return "Use sensor, a positive ratio such as 16:9, a positive decimal "
+             "such as 1.7778, or leave empty.";
+  } else if (key == "camera-zoom") {
+    bool ok = false;
+    const double zoom = value.toDouble(&ok);
+    if (!ok || zoom <= 0 || zoom > 1000 ||
+        !QRegularExpression("\\A[0-9]+(?:\\.[0-9]+)?\\z")
+             .match(value)
+             .hasMatch())
+      return "Use a positive zoom factor up to 1000, such as 1.5, or leave "
+             "empty.";
+  } else if (key == "new-display") {
     static const QRegularExpression pattern(
         "\\A(?:([0-9]{1,5})x([0-9]{1,5}))?(?:/([0-9]{1,5}))?\\z");
     const auto match = pattern.match(value);
@@ -343,8 +468,15 @@ PreferenceIssue sessionIssue(const Preferences &p, bool recording) {
     if (!error.isEmpty())
       return {option.key, option.title + ": " + error};
   }
+  const bool camera =
+      p.options.value("video-source", "display").toString() == "camera";
   const bool virtualDisplay =
-      p.options.value("virtual-display", false).toBool();
+      !camera && p.options.value("virtual-display", false).toBool();
+  if (camera && p.options.value("camera-high-speed", false).toBool() &&
+      p.options.value("camera-fps", 0).toInt() == 0)
+    return {"camera-fps",
+            "High-speed camera capture needs an explicit supported camera "
+            "frame rate."};
   if (virtualDisplay && p.options.value("display-id", 0).toInt() != 0)
     return {"display-id",
             "A new virtual display cannot use an existing display ID. Set "
@@ -364,6 +496,7 @@ PreferenceIssue sessionIssue(const Preferences &p, bool recording) {
 
 Preferences Preferences::load(QSettings &s) {
   Preferences p = bundledPreferences();
+  const int settingsVersion = s.value("metadata/settings-version", 1).toInt();
   p.size = qBound(0, s.value("session/size", p.size).toInt(), 8192);
   p.fps = qBound(1, s.value("session/fps", p.fps).toInt(), 240);
   p.bitrate = qBound(1, s.value("session/bitrate", p.bitrate).toInt(), 200);
@@ -384,10 +517,17 @@ Preferences Preferences::load(QSettings &s) {
   for (const auto &option : sessionOptions())
     p.options.insert(
         option.key, normalizedOption(option, s.value("options/" + option.key)));
+  // Earlier releases wrote "output" for everyone because it was the default,
+  // so it cannot represent an intentional override. Migrate it to scrcpy's
+  // source-aware default before camera capture becomes available.
+  if (settingsVersion < 2 &&
+      p.options.value("audio-source").toString() == "output")
+    p.options.insert("audio-source", "auto");
   return p;
 }
 
 void Preferences::save(QSettings &s) const {
+  s.setValue("metadata/settings-version", 2);
   s.setValue("session/codec", codec);
   s.setValue("session/mouse", mouse);
   s.setValue("captures/directory", mediaDirectory);
@@ -433,6 +573,12 @@ QList<Device> parseDevices(const QString &output) {
 
 QStringList mirrorArguments(const QString &serial, const Preferences &p,
                             const QString &recording) {
+  const bool camera =
+      p.options.value("video-source", "display").toString() == "camera";
+  const auto cameraSize = p.options.value("camera-size").toString().trimmed();
+  const bool exactCameraSize =
+      camera && cameraSize.isEmpty() == false &&
+      textOptionError("camera-size", cameraSize).isEmpty();
   QStringList args{"--serial=" + serial,
                    "--max-fps=" + QString::number(p.fps),
                    "--video-bit-rate=" + QString::number(p.bitrate) + "M",
@@ -440,7 +586,7 @@ QStringList mirrorArguments(const QString &serial, const Preferences &p,
                    "--mouse=" + p.mouse,
                    "--video-codec=" + p.codec,
                    "--window-title=DroidCast Desktop | " + serial};
-  if (p.size > 0)
+  if (p.size > 0 && !exactCameraSize)
     args << "--max-size=" + QString::number(p.size);
   if (!p.audio)
     args << "--no-audio";
@@ -464,6 +610,11 @@ QStringList mirrorArguments(const QString &serial, const Preferences &p,
     if (!sessionOptionAvailable(option, p))
       continue;
     if (option.key == "virtual-display")
+      continue;
+    if (option.key == "camera-facing" &&
+        !p.options.value("camera-id").toString().trimmed().isEmpty())
+      continue;
+    if (option.key == "camera-ar" && exactCameraSize)
       continue;
     if (option.key == "new-display") {
       args << (value.toString().isEmpty()
@@ -863,7 +1014,7 @@ void Engine::inspectDevice(const QString &serial) {
   inspectionSerial = serial;
   inspectionOutput.clear();
   inspectionAborted = false;
-  emit inspectionResult(serial, "Inspecting displays and encoders…");
+  emit inspectionResult(serial, "Inspecting displays, encoders and cameras…");
   auto env = QProcessEnvironment::systemEnvironment();
   env.remove("DROIDCAST_SESSION_TOKEN");
   env.insert("ADB", executablePath(preferences.adb));
@@ -872,7 +1023,8 @@ void Engine::inspectDevice(const QString &serial) {
   inspector.setProcessEnvironment(env);
   inspectionTimeout.start(20000);
   inspector.start(preferences.scrcpy,
-                  {"--serial=" + serial, "--list-displays", "--list-encoders"});
+                  {"--serial=" + serial, "--list-displays", "--list-encoders",
+                   "--list-camera-sizes"});
 }
 
 void Engine::cancelInspection() {
@@ -926,10 +1078,15 @@ bool Engine::start(const QString &serial, const QString &recording) {
   activeSerial = serial;
   activeRecording = recording;
   activeReadOnly = preferences.options.value("no-control", false).toBool();
+  activeCamera =
+      preferences.options.value("video-source", "display").toString() ==
+      "camera";
   activeAlternateDisplay =
-      preferences.options.value("virtual-display", false).toBool() ||
-      preferences.options.value("display-id", 0).toInt() != 0;
+      !activeCamera &&
+      (preferences.options.value("virtual-display", false).toBool() ||
+       preferences.options.value("display-id", 0).toInt() != 0);
   activeFlexibleDisplay =
+      !activeCamera &&
       preferences.options.value("virtual-display", false).toBool() &&
       preferences.options.value("flex-display", false).toBool() &&
       !activeReadOnly;
@@ -1131,9 +1288,13 @@ bool Engine::canUseDevice(const QString &serial) {
 
 void Engine::capture(const QString &serial, const QString &path) {
   if (!captureAllowed(serial)) {
-    emit message("Screenshots of active secondary or virtual displays are not "
-                 "supported yet. Use session recording instead; the primary "
-                 "display was not captured.");
+    emit message(cameraSession()
+                     ? "Screenshots do not capture the active camera stream. "
+                       "Use session recording instead; the phone display was "
+                       "not captured."
+                     : "Screenshots of active secondary or virtual displays "
+                       "are not supported yet. Use session recording instead; "
+                       "the primary display was not captured.");
     return;
   }
   if (!canUseDevice(serial) || path.isEmpty())
@@ -1181,6 +1342,11 @@ bool Engine::controlAllowed() const {
 }
 
 void Engine::phoneAction(const QString &serial, PhoneAction action) {
+  if (cameraSession()) {
+    emit message("Phone-toolbar commands are disabled during camera capture. "
+                 "No command was sent to the Android display.");
+    return;
+  }
   if (usesAlternateDisplay()) {
     emit message("Phone-toolbar commands are disabled for secondary or virtual "
                  "displays. Use input inside the mirror window; no command was "
