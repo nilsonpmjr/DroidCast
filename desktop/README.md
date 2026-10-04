@@ -61,6 +61,9 @@ Windows/macOS build paths have not yet been exercised.
   selected phone, recording destination, screenshot capture, APK installation,
   Back/Home/Recents/Power/volume toolbar and graceful stop. The live video opens in
   a separate DroidCast mirror window; the workspace illustration is not a preview.
+  Window controls provide fullscreen, fit/pixel-perfect sizing, rotation and
+  pause/resume through the fork. Pausing freezes only the computer image; audio
+  and recording continue. These host-only controls also work in read-only mode.
 - **Wireless pairing:** six-digit pairing code and separate pairing/connection
   addresses. Codes go through stdin and are never saved.
 - **Recordings & captures:** actual local PNG, MKV and MP4 files, type filters,

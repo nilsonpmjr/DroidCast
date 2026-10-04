@@ -6,15 +6,40 @@ their normal stdin behavior. The desktop generates a new token per launch.
 
 - Parent → child stdin: the byte `Q` requests an SDL quit event. EOF does the same.
   This follows scrcpy's normal window-close cleanup, including joining the recorder.
+- After `window-controls-ready`, the parent can send window commands below. They
+  are whitelisted bytes delivered to the SDL thread, not shell commands or
+  synthesized keyboard shortcuts. Unknown bytes are ignored; `Q` takes priority.
 - Child → parent stdout: `DROIDCAST/1 <token> <event>\n`.
 - Events: `bridge-ready`, `bridge-error`, `first-frame`, `recording-finalized`,
   `recording-error`, `ended`, `disconnected`, `failed`.
+- Window events: `window-controls-ready` and
+  `window-result:<byte>:handled` / `window-result:<byte>:unavailable`.
 - `first-frame` is emitted once, after uploading and rendering a video frame.
   Starting a process alone is not evidence of video readiness.
 - Recording status comes from the recorder callback after trailer/output close;
   process completion is still required before a new session can begin.
 - Stderr remains ordinary diagnostic output. The desktop accepts only exact
   protocol lines matching the current session token, and bounds partial lines.
+
+| Byte | Computer-window action |
+| --- | --- |
+| `F` | Toggle fullscreen |
+| `W` | Resize to fit |
+| `Z` | Resize to pixel-perfect size |
+| `L` / `R` | Rotate the displayed image left / right |
+| `P` / `U` | Pause / resume the displayed image |
+
+These commands do not mutate Android and are allowed in read-only mode. Pause
+does not pause the phone, audio, or recording. Resize is rejected in fullscreen
+or maximized mode. A handled response acknowledges dispatch, not a guarantee that
+the window manager honored the requested geometry/fullscreen state. The desktop
+does not maintain optimistic fullscreen or paused toggle state, so keyboard
+shortcuts in the mirror cannot leave a stale toggle in the desktop UI.
+
+Only one window command can be outstanding. After two seconds without a matching
+response, the desktop disables window commands until a new session starts. It
+never retries toggles automatically, and late replies cannot complete a later
+command in the same session. Stop remains available independently.
 
 The desktop gives normal cleanup five seconds, then kills an unresponsive child
 and preserves an incomplete-recording warning. Killing the parent or a machine

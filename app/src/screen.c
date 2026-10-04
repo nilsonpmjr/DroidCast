@@ -1136,6 +1136,41 @@ sc_disconnect_on_timeout(struct sc_disconnect *d, void *userdata) {
 void
 sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
     switch (event->type) {
+        case SC_EVENT_DESKTOP_WINDOW_COMMAND: {
+            char command = (char) event->user.code;
+            bool available = screen->video && screen->window_shown
+                          && !screen->disconnected;
+            if (available && (command == 'W' || command == 'Z')
+                    && !is_windowed(screen)) {
+                available = false;
+            }
+            if (available) {
+                switch (command) {
+                    case 'F': sc_screen_toggle_fullscreen(screen); break;
+                    case 'W': sc_screen_resize_to_fit(screen); break;
+                    case 'Z': sc_screen_resize_to_pixel_perfect(screen); break;
+                    case 'L':
+                    case 'R':
+                        sc_screen_set_orientation(screen,
+                            sc_orientation_apply(screen->orientation,
+                                command == 'R' ? SC_ORIENTATION_90
+                                               : SC_ORIENTATION_270));
+                        break;
+                    case 'P':
+                        if (!screen->paused) {
+                            sc_screen_set_paused(screen, true);
+                        }
+                        break;
+                    case 'U': sc_screen_set_paused(screen, false); break;
+                    default: available = false; break;
+                }
+            }
+            char result[64];
+            snprintf(result, sizeof(result), "window-result:%c:%s", command,
+                     available ? "handled" : "unavailable");
+            sc_desktop_bridge_report(result);
+            return;
+        }
         case SC_EVENT_OPEN_WINDOW: {
             struct sc_size *size = event->user.data1;
             assert(size);

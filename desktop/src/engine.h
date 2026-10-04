@@ -55,6 +55,17 @@ public:
   enum class PhoneAction { Back, Home, Recents, Power, VolumeUp, VolumeDown };
   void phoneAction(const QString &serial, PhoneAction action);
   bool controlAllowed() const;
+  enum class WindowAction {
+    Fullscreen,
+    Fit,
+    PixelPerfect,
+    RotateLeft,
+    RotateRight,
+    Pause,
+    Resume
+  };
+  void windowAction(WindowAction action);
+  bool windowControlsAvailable() const;
   enum class SessionState {
     Idle,
     Starting,
@@ -79,6 +90,8 @@ signals:
   void scanChanged();
   void wirelessChanged();
   void deviceTaskChanged();
+  void windowControlsChanged();
+  void windowControlMessage(const QString &text);
   void captureSaved(const QString &path);
   void message(const QString &text);
   void log(const QString &text);
@@ -96,6 +109,9 @@ private:
   bool forcedStop = false, bridgeReady = false, recordingFinalized = false,
        recordingFailed = false;
   QByteArray sessionToken, mirrorOutput;
+  QTimer windowCommandTimeout;
+  bool windowCommandsReady = false, windowCommandsHealthy = true;
+  char pendingWindowCommand = 0;
   void readMirrorOutput();
   QByteArray scanOutput, wirelessOutput, pairingInput;
 };

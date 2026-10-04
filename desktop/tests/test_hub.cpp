@@ -5,6 +5,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QImage>
+#include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
 #include <QPushButton>
@@ -42,6 +43,104 @@ private slots:
     applyTheme(*qobject_cast<QApplication *>(QCoreApplication::instance()));
   }
   void init() { qunsetenv("HUB_TEST_MODE"); }
+  void windowToolbarIsLabelledAndRespondsToEngine() {
+    QSettings settings;
+    auto prefs = bundledPreferences();
+    prefs.options["no-control"] = true;
+    prefs.save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    QList<QPushButton *> controls;
+    QPushButton *pause = nullptr;
+    for (auto *button : window.findChildren<QPushButton *>()) {
+      if (!button->property("windowControl").toBool())
+        continue;
+      controls.append(button);
+      QVERIFY(!button->isEnabled());
+      QVERIFY(button->accessibleName().startsWith("Mirror window:"));
+      if (button->text() == "Pause image")
+        pause = button;
+    }
+    QCOMPARE(controls.size(), 7);
+    QVERIFY(pause);
+    auto *start = window.findChild<QPushButton *>("startMirror");
+    QTRY_VERIFY(start->isEnabled());
+    QTest::mouseClick(start, Qt::LeftButton);
+    QTRY_VERIFY(pause->isEnabled());
+    pause->click();
+    QVERIFY(!pause->isEnabled());
+    auto *feedback = window.findChild<QLabel *>("windowControlFeedback");
+    QTRY_VERIFY(feedback->text().contains("Mirror image paused"));
+    QVERIFY(pause->isEnabled());
+    for (auto *button : window.findChildren<QPushButton *>())
+      if (button->property("phoneControl").toBool())
+        QVERIFY(!button->isEnabled());
+    window.findChild<QPushButton *>("stopMirror")->click();
+    QTRY_VERIFY(start->isEnabled());
+    for (auto *button : controls)
+      QVERIFY(!button->isEnabled());
+    prefs.options.clear();
+    prefs.save(settings);
+  }
+  void windowCommandsRequireReadinessAndWorkReadOnly() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.options["no-control"] = true;
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy feedback(&engine, &Engine::windowControlMessage);
+    QVERIFY(!engine.windowControlsAvailable());
+    engine.windowAction(Engine::WindowAction::Pause);
+    QVERIFY(feedback.last().first().toString().contains("require"));
+    QVERIFY(engine.start("PHONE123"));
+    QVERIFY(!engine.windowControlsAvailable());
+    QTRY_VERIFY_WITH_TIMEOUT(engine.windowControlsAvailable(), 3000);
+    QVERIFY(!engine.controlAllowed());
+    for (const auto action :
+         {Engine::WindowAction::Fullscreen, Engine::WindowAction::Fit,
+          Engine::WindowAction::PixelPerfect, Engine::WindowAction::RotateLeft,
+          Engine::WindowAction::RotateRight, Engine::WindowAction::Pause,
+          Engine::WindowAction::Resume}) {
+      engine.windowAction(action);
+      QVERIFY(!engine.windowControlsAvailable());
+      QTRY_VERIFY_WITH_TIMEOUT(engine.windowControlsAvailable(), 3000);
+      QVERIFY(!feedback.last().first().toString().contains("Waiting"));
+    }
+    QVERIFY(feedback.last().first().toString().contains("resumed"));
+    engine.stop();
+    QVERIFY(!engine.windowControlsAvailable());
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
+  }
+  void windowCommandsHandleUnavailableTimeoutAndOldEngine() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy feedback(&engine, &Engine::windowControlMessage);
+    qputenv("HUB_TEST_MODE", "window-unavailable");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.windowControlsAvailable());
+    engine.windowAction(Engine::WindowAction::Fit);
+    QTRY_VERIFY(engine.windowControlsAvailable());
+    QVERIFY(feedback.last().first().toString().contains("unavailable"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+    qputenv("HUB_TEST_MODE", "window-timeout");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.windowControlsAvailable());
+    engine.windowAction(Engine::WindowAction::Pause);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        feedback.last().first().toString().contains("No confirmation"), 4000);
+    QVERIFY(!engine.windowControlsAvailable());
+    QVERIFY(engine.running());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+    qputenv("HUB_TEST_MODE", "old-bridge");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    QVERIFY(!engine.windowControlsAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+  }
   void inputModesOnlyEmitCompatibleOptions() {
     Preferences prefs;
     prefs.options = {{"key-injection", "prefer-text"},

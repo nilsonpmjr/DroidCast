@@ -54,6 +54,15 @@ read_commands(void *userdata, SDL_TimerID timer_id, Uint32 interval) {
         sc_push_event(SDL_EVENT_QUIT);
         return 0;
     }
+    for (int i = 0; i < count; ++i) {
+        if (bytes[i] && strchr("FWZLRPU", bytes[i])) {
+            SDL_Event event = {
+                .user = {.type = SC_EVENT_DESKTOP_WINDOW_COMMAND,
+                         .code = bytes[i]},
+            };
+            SDL_PushEvent(&event);
+        }
+    }
     return interval;
 }
 
@@ -84,6 +93,7 @@ sc_desktop_bridge_first_frame(void) {
     if (!frame_reported) {
         frame_reported = true;
         sc_desktop_bridge_report("first-frame");
+        sc_desktop_bridge_report("window-controls-ready");
     }
 }
 

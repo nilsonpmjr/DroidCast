@@ -77,7 +77,11 @@ int main(int argc, char **argv) {
          "first-frame\n";
   out.flush();
   if (mode != "no-frame")
-    QTimer::singleShot(100, &app, [&] { report("first-frame"); });
+    QTimer::singleShot(100, &app, [&] {
+      report("first-frame");
+      if (mode != "old-bridge")
+        report("window-controls-ready");
+    });
   if (mode == "disconnect")
     QTimer::singleShot(250, &app, [&] {
       report("disconnected");
@@ -100,6 +104,14 @@ int main(int argc, char **argv) {
     struct pollfd input = {STDIN_FILENO, POLLIN, 0};
     if (poll(&input, 1, 0) <= 0 || read(STDIN_FILENO, &command, 1) != 1) return;
 #endif
+    if (QByteArray("FWZLRPU").contains(command)) {
+      if (mode != "window-timeout")
+        report(QString("window-result:%1:%2")
+                   .arg(QChar(command), mode == "window-unavailable"
+                                            ? "unavailable"
+                                            : "handled"));
+      return;
+    }
     if (command != 'Q')
       return;
     for (const auto &arg : args)

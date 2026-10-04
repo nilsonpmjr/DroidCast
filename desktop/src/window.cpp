@@ -362,6 +362,50 @@ QWidget *Window::sessionPage() {
             });
   }
   preview->addLayout(phoneControls);
+  preview->addWidget(label("Mirror window", "section"));
+  preview->addWidget(
+      label("These controls affect the computer window, not Android. Pausing "
+            "the image does not pause audio or recording.",
+            "muted"));
+  auto *windowControls = new QGridLayout;
+  windowControls->setSpacing(8);
+  int windowIndex = 0;
+  for (const auto &entry :
+       {qMakePair(QString("Toggle fullscreen"),
+                  Engine::WindowAction::Fullscreen),
+        qMakePair(QString("Fit window"), Engine::WindowAction::Fit),
+        qMakePair(QString("Pixel-perfect size"),
+                  Engine::WindowAction::PixelPerfect),
+        qMakePair(QString("Rotate left"), Engine::WindowAction::RotateLeft),
+        qMakePair(QString("Rotate right"), Engine::WindowAction::RotateRight),
+        qMakePair(QString("Pause image"), Engine::WindowAction::Pause),
+        qMakePair(QString("Resume image"), Engine::WindowAction::Resume)}) {
+    auto *control = button(entry.first);
+    control->setProperty("windowControl", true);
+    control->setAccessibleName("Mirror window: " + entry.first);
+    control->setMinimumHeight(40);
+    if (windowIndex == 0)
+      windowControls->addWidget(control, 0, 0, 1, 2);
+    else
+      windowControls->addWidget(control, (windowIndex + 1) / 2,
+                                (windowIndex - 1) % 2);
+    ++windowIndex;
+    connect(control, &QPushButton::clicked, this,
+            [this, action = entry.second] { engine.windowAction(action); });
+  }
+  preview->addLayout(windowControls);
+  auto *windowFeedback =
+      label("Start mirroring to use window controls.", "muted");
+  windowFeedback->setObjectName("windowControlFeedback");
+  preview->addWidget(windowFeedback);
+  connect(&engine, &Engine::windowControlMessage, windowFeedback,
+          &QLabel::setText);
+  connect(&engine, &Engine::windowControlsChanged, this,
+          &Window::updateActions);
+  connect(&engine, &Engine::sessionChanged, this, [this, windowFeedback] {
+    if (engine.sessionState() != Engine::SessionState::Streaming)
+      windowFeedback->setText(engine.sessionStateText());
+  });
   preview->addStretch();
   columns->addWidget(previewCard, 3);
   auto *controls = new QVBoxLayout;
@@ -937,6 +981,8 @@ void Window::updateActions() {
     if (control->property("phoneControl").toBool())
       control->setEnabled(screenshotButton->isEnabled() &&
                           engine.controlAllowed());
+    else if (control->property("windowControl").toBool())
+      control->setEnabled(engine.windowControlsAvailable());
   if (state == "unauthorized")
     deviceHelp->setText("Unlock your phone and accept the USB debugging "
                         "prompt. Devices refresh automatically.");

@@ -64,3 +64,23 @@ uses ADB; this bridge currently carries lifecycle events and quit only.
 - Added tests for mode compatibility, argument isolation, disabled-mode
   persistence, recording validation and UI enablement. Hardware gamepad and
   recording-format checks remain required.
+
+## Part 4: live mirror-window controls
+
+- Added fullscreen, fit, pixel-perfect size, left/right rotation and separate
+  pause/resume controls, dispatched through the private bridge onto scrcpy's SDL
+  thread. No global key injection is involved.
+- Availability requires a first frame and an explicit engine capability event.
+  Host-window controls remain available in read-only sessions; Android-mutating
+  controls remain disabled. A paused image does not pause audio or recording.
+- Commands are serialized, acknowledged and time-limited. An unconfirmed command
+  disables further window requests until restart rather than retrying a toggle.
+  Stop is independent. Resize in fullscreen/maximized mode is rejected visibly.
+- Kept the existing palette and used labelled native buttons, grouped paired
+  actions, and local feedback with explicit disabled states per UI/UX guidance.
+- Verification includes desktop controller tests, UI tests at 920×680, and a
+  pipe/SDL test verifying all seven command bytes and unknown-byte handling.
+  Visual review used the offscreen native application. Physical-device mirroring,
+  window-manager behavior, Windows and macOS still require manual validation.
+
+This advances ticket 16. Reset-video and other live Android actions remain planned.

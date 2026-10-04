@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 
 #include "desktop_bridge.h"
+#include "events.h"
 
 // Exercise the bridge's real timer, pipe reads and SDL delivery without a phone.
 bool
@@ -32,6 +33,17 @@ int main(void) {
     sc_desktop_bridge_first_frame();
     assert(SDL_WaitEventTimeout(&event, 1000));
     assert(event.type == SDL_EVENT_QUIT);
+    sc_desktop_bridge_stop();
+
+    sc_desktop_bridge_start();
+    assert(write(pipes[1], "?FWZLRPU", 8) == 8);
+    const char *expected = "FWZLRPU";
+    for (int i = 0; i < 7; ++i) {
+        assert(SDL_WaitEventTimeout(&event, 1000));
+        assert(event.type == SC_EVENT_DESKTOP_WINDOW_COMMAND);
+        assert(event.user.code == expected[i]);
+    }
+    assert(!SDL_WaitEventTimeout(&event, 100));
     sc_desktop_bridge_stop();
 
     // Closing the parent pipe must also leave through the normal quit route.

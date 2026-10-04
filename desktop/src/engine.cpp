@@ -350,6 +350,15 @@ Preferences bundledPreferences() {
 }
 
 Engine::Engine(QObject *parent) : QObject(parent) {
+  windowCommandTimeout.setSingleShot(true);
+  connect(&windowCommandTimeout, &QTimer::timeout, this, [this] {
+    pendingWindowCommand = 0;
+    windowCommandsHealthy = false;
+    emit windowControlMessage(
+        "No confirmation from the mirror. Restart the session to re-enable "
+        "window controls; no command was retried.");
+    emit windowControlsChanged();
+  });
   scanTimeout.setSingleShot(true);
   wirelessTimeout.setSingleShot(true);
   stopTimeout.setSingleShot(true);
@@ -415,6 +424,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
           [this](QProcess::ProcessError error) {
             if (error == QProcess::FailedToStart) {
               stopTimeout.stop();
+              windowCommandTimeout.stop();
               state = SessionState::Failed;
               stopping = false;
               activeSerial.clear();
@@ -427,6 +437,8 @@ Engine::Engine(QObject *parent) : QObject(parent) {
   connect(&mirror, &QProcess::finished, this,
           [this](int code, QProcess::ExitStatus status) {
             stopTimeout.stop();
+            windowCommandTimeout.stop();
+            pendingWindowCommand = 0;
             readMirrorOutput();
             const bool clean = code == 0 && status == QProcess::NormalExit &&
                                !forcedStop && !recordingFailed;
@@ -637,6 +649,11 @@ bool Engine::start(const QString &serial, const QString &recording) {
   activeReadOnly = preferences.options.value("no-control", false).toBool();
   stopping = false;
   state = SessionState::Starting;
+  windowCommandsReady = false;
+  windowCommandsHealthy = true;
+  pendingWindowCommand = 0;
+  emit windowControlMessage(
+      "Window controls become available after the first video frame.");
   forcedStop = bridgeReady = recordingFinalized = recordingFailed = false;
   mirrorOutput.clear();
   sessionToken = QUuid::createUuid().toString(QUuid::Id128).toLatin1();
@@ -654,6 +671,8 @@ void Engine::stop() {
   if (!running() || stopping)
     return;
   stopping = true;
+  windowCommandTimeout.stop();
+  pendingWindowCommand = 0;
   state = SessionState::Stopping;
   emit message("Stopping session and finishing any recording…");
   // The fork handles this on its SDL event loop, following window-close
@@ -701,6 +720,31 @@ void Engine::readMirrorOutput() {
              state == SessionState::Starting) {
       state = SessionState::Streaming;
       emit message("Phone video is streaming in the mirror window.");
+      emit windowControlMessage("Video is streaming. Window controls require "
+                                "support from the bundled engine.");
+    } else if (event == "window-controls-ready" && bridgeReady) {
+      windowCommandsReady = true;
+      emit windowControlMessage("Window controls ready. These actions affect "
+                                "the computer display only.");
+    } else if (event.startsWith("window-result:") && bridgeReady &&
+               pendingWindowCommand) {
+      const QByteArray expected =
+          QByteArray("window-result:") + pendingWindowCommand + ':';
+      if (event == expected + "handled" || event == expected + "unavailable") {
+        windowCommandTimeout.stop();
+        const bool handled = event.endsWith(":handled");
+        const char command = pendingWindowCommand;
+        pendingWindowCommand = 0;
+        emit windowControlMessage(
+            !handled ? "This action is unavailable. For resizing, leave "
+                       "fullscreen or maximized mode first."
+            : command == 'P'
+                ? "Mirror image paused. Phone, audio and recording continue."
+            : command == 'U' ? "Mirror image resumed."
+                             : "Window request handled by the mirror. "
+                               "Window-manager restrictions may still apply.");
+        emit windowControlsChanged();
+      }
     } else if (event == "recording-finalized" && bridgeReady)
       recordingFinalized = true;
     else if (event == "recording-error" && bridgeReady)
@@ -715,6 +759,56 @@ void Engine::readMirrorOutput() {
     emit log(QString::fromUtf8(mirrorOutput.left(65536)));
     mirrorOutput.clear();
   }
+}
+
+bool Engine::windowControlsAvailable() const {
+  return running() && state == SessionState::Streaming && windowCommandsReady &&
+         windowCommandsHealthy && !pendingWindowCommand;
+}
+
+void Engine::windowAction(WindowAction action) {
+  if (!windowControlsAvailable()) {
+    emit windowControlMessage(
+        "Window controls require a streaming session and no pending request.");
+    return;
+  }
+  char command;
+  switch (action) {
+  case WindowAction::Fullscreen:
+    command = 'F';
+    break;
+  case WindowAction::Fit:
+    command = 'W';
+    break;
+  case WindowAction::PixelPerfect:
+    command = 'Z';
+    break;
+  case WindowAction::RotateLeft:
+    command = 'L';
+    break;
+  case WindowAction::RotateRight:
+    command = 'R';
+    break;
+  case WindowAction::Pause:
+    command = 'P';
+    break;
+  case WindowAction::Resume:
+    command = 'U';
+    break;
+  default:
+    return;
+  }
+  pendingWindowCommand = command;
+  if (mirror.write(&command, 1) != 1) {
+    pendingWindowCommand = 0;
+    windowCommandsHealthy = false;
+    emit windowControlMessage(
+        "Could not send the window command. Restart the session.");
+  } else {
+    windowCommandTimeout.start(2000);
+    emit windowControlMessage("Waiting for the mirror to handle the request…");
+  }
+  emit windowControlsChanged();
 }
 
 void Engine::connectWireless(const QString &endpoint, const QString &code) {
