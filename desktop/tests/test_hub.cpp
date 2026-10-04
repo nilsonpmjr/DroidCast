@@ -13,6 +13,7 @@
 #include <QScrollArea>
 #include <QScrollBar>
 #include <QSignalSpy>
+#include <QSpinBox>
 #include <QStackedWidget>
 #include <QTemporaryDir>
 #include <QtTest>
@@ -517,6 +518,52 @@ private slots:
     window.findChild<QListWidget *>("devices")->setCurrentRow(1);
     QCOMPARE(camera->count(), 1);
     QVERIFY(!camera->isEnabled());
+    bundledPreferences().save(settings);
+  }
+  void inspectionPopulatesDisplayAndEncoderSelectors() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(5);
+    auto *category = window.findChild<QComboBox *>("settingsCategory");
+    auto *display = window.findChild<QComboBox *>("detectedDisplay");
+    auto *encoder = window.findChild<QComboBox *>("detectedVideoEncoder");
+    auto *displayField = window.findChild<QSpinBox *>("option-display-id");
+    auto *encoderField = window.findChild<QLineEdit *>("option-video-encoder");
+    auto *codec = window.findChild<QComboBox *>("base-video-codec");
+    QVERIFY(category && display && encoder && displayField && encoderField &&
+            codec);
+    category->setCurrentText("Video");
+    QVERIFY(!display->isEnabled());
+    auto *inspect = window.findChild<QPushButton *>("inspectDevice");
+    QTRY_VERIFY(inspect->isEnabled());
+    inspect->click();
+    QTRY_COMPARE(display->count(), 3);
+    QCOMPARE(encoder->count(), 3);
+    QVERIFY(display->isEnabled());
+    const int displayIndex = display->findData(2);
+    display->setCurrentIndex(displayIndex);
+    QMetaObject::invokeMethod(display, "activated", Qt::DirectConnection,
+                              Q_ARG(int, displayIndex));
+    QCOMPARE(displayField->value(), 2);
+    codec->setCurrentText("h265");
+    QCOMPARE(encoder->count(), 2);
+    QCOMPARE(encoder->itemData(1).toString(),
+             QString("c2.android.hevc.encoder"));
+    encoderField->setText("vendor.manual.encoder");
+    QMetaObject::invokeMethod(encoderField, "editingFinished",
+                              Qt::DirectConnection);
+    QCOMPARE(encoder->currentIndex(), 0);
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    window.findChild<QListWidget *>("devices")->setCurrentRow(1);
+    QCOMPARE(display->count(), 1);
+    QCOMPARE(encoder->count(), 1);
+    QVERIFY(!display->isEnabled());
     bundledPreferences().save(settings);
   }
   void virtualDisplayArgumentsAndValidation() {

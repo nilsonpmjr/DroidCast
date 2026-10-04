@@ -260,3 +260,16 @@ device compatibility testing remain open.
 - This part intentionally does not change settings UI yet. Guided selectors, manual
   fallback write-through, target-scoped caching and layout/accessibility tests remain
   the next bounded implementation step.
+
+## Part 13: guided display and encoder selection
+
+- Added detected-display and detected-encoder selectors to advanced Video settings.
+  Choosing a declaration writes through the existing validated manual control.
+- Encoder choices follow the selected H.264/H.265/AV1 codec and retain hardware,
+  software, hybrid and vendor annotations from the inspection report.
+- Display guidance is disabled for camera and virtual-display modes so a physical
+  display ID is not presented as compatible with those capture sources.
+- Manual values remain valid and return the guided selector to its neutral entry;
+  inspected records are cleared when the selected target changes.
+- Tests cover selector population and write-through, codec filtering, manual fallback,
+  target isolation and the no-horizontal-scroll contract at 920×680.

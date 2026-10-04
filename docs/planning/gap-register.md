@@ -24,7 +24,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Device workspace | Partial | USB discovery, wireless pair/connect, screenshots, APK install and selected-device targeting. | Complete pair-to-mirror guidance and broader recovery testing. |
 | Configuration routes | Partial | Searchable Video, Camera, Audio, Device, Window, Keyboard, Mouse, Gamepad, Recording and Virtual display categories. | Connection/Tunnels, Control, OTG, Video4Linux and complete Shortcuts routes. |
 | Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, Android/window rotation, reset video, mirror-window actions and contextual camera controls. | Clipboard, app/file actions and measured FPS. |
-| Video | Partial | Codec, bitrate, FPS, size, crop, orientation, display ID, encoder, inspection and defensive display/encoder parsing. | Guided capability selectors, codec options, constraint overrides and hardware proof. |
+| Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
 | Audio | Partial | Enablement, source, codec and buffers. | Duplication, encoder/bitrate, require-audio, audio-only and playback policies. |
 | Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior and UHID gamepad. | Mouse bindings, shortcut modifier, AOA modes, gesture help and peripheral tests. |
 | Virtual display | Partial | Creation, size/DPI, flex, package launch, IME, decorations and close policy. | Structured app picker and Android 10+ hardware journeys. |
@@ -36,24 +36,23 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
 
-## Next implementation: guided display and encoder capabilities
+## Completed slice: guided display and encoder capabilities
 
-The defensive parser foundation is implemented. The next bounded slice wires its
-records into the configuration workspace. Like the camera work, declarations
-guide valid choices without pretending they guarantee runtime support.
+The parser and configuration UI are implemented. Like the camera work,
+declarations guide valid choices without pretending they guarantee runtime support.
 
 1. **Done:** parse display IDs/sizes and codec-grouped video encoders from the
    bounded inspection report, stopping cleanly at unrelated sections.
-2. Keep the raw report and manual values available for incomplete vendor output.
-3. Populate a display selector without confusing a physical display with a new
+2. **Done:** keep the raw report and manual values available for incomplete vendor output.
+3. **Done:** populate a display selector without confusing a physical display with a new
    virtual display; choosing one must update the existing validated `display-id`.
-4. Group encoder choices by codec and show only encoders compatible with the chosen
+4. **Done:** group encoder choices by codec and show only encoders compatible with the chosen
    H.264/H.265/AV1 codec while preserving an unlisted manual encoder value.
-5. Cache declarations only for the selected connection and clear them on target
+5. **Done:** cache declarations only for the selected connection and clear them on target
    change, failed inspection or an empty/malformed report.
-6. Keep camera-mode dependencies intact: display choice is disabled for camera, while
+6. **Done:** keep camera-mode dependencies intact: display choice is disabled for camera, while
    camera guidance remains isolated from display/encoder guidance.
-7. Test multi-display/multi-codec, malformed output, manual fallback, target isolation,
+7. **Done:** test multi-display/multi-codec, malformed output, manual fallback, target isolation,
    keyboard access and 920×680 layout.
 8. Verify at least one hardware encoder and a non-primary display on real devices;
    record rejected choices as runtime evidence rather than hiding them.

@@ -30,8 +30,11 @@ int main(int argc, char **argv) {
     }
     out << args.join('|')
         << "\nList of displays:\n --display-id=0 (1080x2400)\n"
+        << " --display-id=2 (1920x1080)\n"
         << "List of video encoders:\n --video-codec=h264 "
-           "--video-encoder=c2.android.avc.encoder\n"
+           "--video-encoder=c2.android.avc.encoder (hw)\n"
+        << " --video-codec=h264 --video-encoder=OMX.vendor.avc (hybrid)\n"
+        << " --video-codec=h265 --video-encoder=c2.android.hevc.encoder (hw)\n"
         << "List of cameras:\n --camera-id=0 (back, 1920x1080, "
            "fps={30, 60}, zoom-range=[1, 8])\n"
         << "   - 1920x1080\n   - 1280x720\n"
@@ -107,8 +110,7 @@ int main(int argc, char **argv) {
             !args.contains("--no-control") && mode != "old-android-bridge")
           report("android-controls-ready");
         else if (args.contains("--video-source=camera") &&
-                 !args.contains("--no-control") &&
-                 mode != "old-camera-bridge")
+                 !args.contains("--no-control") && mode != "old-camera-bridge")
           report("camera-controls-ready");
       }
     });

@@ -90,8 +90,9 @@ Windows/macOS build paths have not yet been exercised.
   not apply to the chosen input mode are inactive, but their saved values remain.
   Advanced video includes crop, capture orientation/locking, Android display ID,
   encoder name and automatic-downsize opt-out. Inspect an authorized phone while
-  idle to read its real display/encoder report, then copy the desired ID or name.
-  Inspection has cancellation and a timeout; it does not start a mirror.
+  idle to populate guided display and codec-matched encoder choices. The raw report
+  and manual fields remain available for incomplete vendor declarations. Inspection
+  has cancellation and a timeout; it does not start a mirror.
   The **Virtual display** category adds Android 10+ display creation, resolution/
   density, flexible resizing, keyboard placement, system decorations and app
   handling on close. An optional exact Android package starts on that display;

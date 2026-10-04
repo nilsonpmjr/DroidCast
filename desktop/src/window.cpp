@@ -808,6 +808,7 @@ QWidget *Window::settingsPage() {
     savePreferences();
   });
   auto *codec = new QComboBox;
+  codec->setObjectName("base-video-codec");
   codec->addItems({"h264", "h265", "av1"});
   codec->setCurrentText(engine.preferences.codec);
   field(form, "Video codec", codec);
@@ -815,6 +816,7 @@ QWidget *Window::settingsPage() {
           [this](const QString &v) {
             engine.preferences.codec = v;
             savePreferences();
+            updateDeviceCapabilitySelectors();
           });
   form->addRow(label("H.264 is the most compatible option. HEVC and AV1 "
                      "require support from your phone's encoder.",
@@ -856,6 +858,34 @@ QWidget *Window::settingsPage() {
     auto *fields = new QFormLayout(group);
     fields->setSpacing(12);
     QString terms = category;
+    if (category == "Video") {
+      displaySelector = new QComboBox;
+      displaySelector->setObjectName("detectedDisplay");
+      displaySelector->setAccessibleName("Detected Android display");
+      videoEncoderSelector = new QComboBox;
+      videoEncoderSelector->setObjectName("detectedVideoEncoder");
+      videoEncoderSelector->setAccessibleName("Detected video encoder");
+      field(fields, "Detected display", displaySelector);
+      field(fields, "Detected encoder", videoEncoderSelector);
+      fields->addRow(label(
+          "Inspect the selected phone to populate declared resources. Manual "
+          "display and encoder fields remain available below.",
+          "muted"));
+      connect(displaySelector, qOverload<int>(&QComboBox::activated), this,
+              [this](int index) {
+                const auto value = displaySelector->itemData(index);
+                if (value.isValid())
+                  findChild<QSpinBox *>("option-display-id")
+                      ->setValue(value.toInt());
+              });
+      connect(
+          videoEncoderSelector, qOverload<int>(&QComboBox::activated), this,
+          [this](int index) {
+            const auto value = videoEncoderSelector->itemData(index).toString();
+            if (!value.isEmpty())
+              findChild<QLineEdit *>("option-video-encoder")->setText(value);
+          });
+    }
     if (category == "Camera") {
       cameraIdSelector = new QComboBox;
       cameraIdSelector->setObjectName("detectedCamera");
@@ -919,6 +949,8 @@ QWidget *Window::settingsPage() {
                   savePreferences();
                   if (key == "video-source" || key == "camera-facing")
                     updateCameraSelectors();
+                  if (key == "video-source")
+                    updateDeviceCapabilitySelectors();
                 });
         control = combo;
       } else if (option.initial.metaType().id() == QMetaType::QString) {
@@ -939,6 +971,9 @@ QWidget *Window::settingsPage() {
         if (option.key == "camera-id" || option.key == "camera-size")
           connect(edit, &QLineEdit::editingFinished, this,
                   &Window::updateCameraSelectors);
+        if (option.key == "video-encoder")
+          connect(edit, &QLineEdit::editingFinished, this,
+                  &Window::updateDeviceCapabilitySelectors);
         connect(edit, &QLineEdit::textChanged, this,
                 [this, key = option.key](const QString &value) {
                   engine.preferences.options.insert(key, value.trimmed());
@@ -952,6 +987,8 @@ QWidget *Window::settingsPage() {
                   engine.preferences.options.insert(key, value);
                   savePreferences();
                   updateActions();
+                  if (key == "virtual-display")
+                    updateDeviceCapabilitySelectors();
                 });
         if (option.key == "camera-high-speed")
           connect(check, &QCheckBox::toggled, this,
@@ -966,6 +1003,9 @@ QWidget *Window::settingsPage() {
                   engine.preferences.options.insert(key, value);
                   savePreferences();
                 });
+        if (option.key == "display-id")
+          connect(spin, &QSpinBox::valueChanged, this,
+                  &Window::updateDeviceCapabilitySelectors);
         control = spin;
       }
       control->setObjectName("option-" + option.key);
@@ -1034,6 +1074,8 @@ QWidget *Window::settingsPage() {
                 report->setPlainText("Device: " + serial + "\n\n" + output);
                 if (cameraReport)
                   setCameraCapabilities(serial, output);
+                else
+                  setDeviceCapabilities(serial, output);
               });
       connect(&engine, &Engine::inspectionChanged, this,
               &Window::updateActions);
@@ -1044,6 +1086,7 @@ QWidget *Window::settingsPage() {
     layout->addWidget(group);
   }
   updateCameraSelectors();
+  updateDeviceCapabilitySelectors();
   auto *noResults = label("No matching settings in this release.", "muted");
   noResults->hide();
   layout->addWidget(noResults);
@@ -1208,6 +1251,66 @@ void Window::updateCameraSelectors() {
   cameraSizeSelector->setEnabled(cameraMode && found && !sizes.isEmpty());
   cameraFpsSelector->setEnabled(cameraMode && found && !frameRates.isEmpty());
 }
+void Window::setDeviceCapabilities(const QString &serial,
+                                   const QString &report) {
+  if (serial != selectedSerial()) {
+    deviceCapabilitySerial.clear();
+    displayCapabilities.clear();
+    videoEncoderCapabilities.clear();
+  } else {
+    displayCapabilities = parseDisplayCapabilities(report);
+    videoEncoderCapabilities = parseVideoEncoderCapabilities(report);
+    deviceCapabilitySerial =
+        displayCapabilities.isEmpty() && videoEncoderCapabilities.isEmpty()
+            ? QString{}
+            : serial;
+  }
+  updateDeviceCapabilitySelectors();
+}
+void Window::updateDeviceCapabilitySelectors() {
+  if (!displaySelector || !videoEncoderSelector)
+    return;
+  const QSignalBlocker displayBlocker(displaySelector);
+  const QSignalBlocker encoderBlocker(videoEncoderSelector);
+  const int selectedDisplay =
+      engine.preferences.options.value("display-id", 0).toInt();
+  const auto selectedEncoder =
+      engine.preferences.options.value("video-encoder").toString().trimmed();
+
+  displaySelector->clear();
+  displaySelector->addItem(displayCapabilities.isEmpty()
+                               ? "Inspect phone to discover displays"
+                               : "Use manual display ID field below",
+                           QVariant{});
+  for (const auto &display : displayCapabilities)
+    displaySelector->addItem(QString::number(display.id) + " · " + display.size,
+                             display.id);
+  displaySelector->setCurrentIndex(
+      qMax(0, displaySelector->findData(selectedDisplay)));
+
+  videoEncoderSelector->clear();
+  videoEncoderSelector->addItem(videoEncoderCapabilities.isEmpty()
+                                    ? "Inspect phone to discover encoders"
+                                    : "Use manual encoder field below",
+                                QString{});
+  for (const auto &encoder : videoEncoderCapabilities) {
+    if (encoder.codec != engine.preferences.codec)
+      continue;
+    const auto suffix =
+        encoder.attributes.isEmpty() ? QString{} : " · " + encoder.attributes;
+    videoEncoderSelector->addItem(encoder.name + suffix, encoder.name);
+  }
+  videoEncoderSelector->setCurrentIndex(
+      qMax(0, videoEncoderSelector->findData(selectedEncoder)));
+  const bool cameraMode =
+      engine.preferences.options.value("video-source", "display").toString() ==
+      "camera";
+  const bool virtualDisplay =
+      engine.preferences.options.value("virtual-display", false).toBool();
+  displaySelector->setEnabled(!cameraMode && !virtualDisplay &&
+                              !displayCapabilities.isEmpty());
+  videoEncoderSelector->setEnabled(videoEncoderSelector->count() > 1);
+}
 void Window::savePreferences() {
   engine.preferences.save(settings);
   for (const auto &option : sessionOptions())
@@ -1325,6 +1428,13 @@ void Window::updateActions() {
     cameraCapabilitySerial.clear();
     cameraCapabilities.clear();
     updateCameraSelectors();
+  }
+  if (!deviceCapabilitySerial.isEmpty() &&
+      deviceCapabilitySerial != selectedSerial()) {
+    deviceCapabilitySerial.clear();
+    displayCapabilities.clear();
+    videoEncoderCapabilities.clear();
+    updateDeviceCapabilitySelectors();
   }
   auto *item = deviceList->currentItem();
   const auto state = item ? item->data(Qt::UserRole + 1).toString() : QString{};
