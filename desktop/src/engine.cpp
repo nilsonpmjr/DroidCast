@@ -632,6 +632,57 @@ QList<CameraCapability> parseCameraCapabilities(const QString &output) {
   return cameras;
 }
 
+QList<DisplayCapability> parseDisplayCapabilities(const QString &output) {
+  QList<DisplayCapability> result;
+  bool inList = false;
+  static const QRegularExpression pattern(
+      "\\A\\s*--display-id=([0-9]+)\\s+\\(([^)]*)\\)\\s*\\z");
+  for (const auto &raw : output.split('\n')) {
+    const auto line = raw.trimmed();
+    if (line.contains("List of displays:")) {
+      inList = true;
+      continue;
+    }
+    if (!inList)
+      continue;
+    if (line.startsWith("List of "))
+      break;
+    const auto match = pattern.match(raw);
+    if (!match.hasMatch())
+      continue;
+    bool ok = false;
+    const int id = match.captured(1).toInt(&ok);
+    if (ok)
+      result.append({id, match.captured(2).trimmed()});
+  }
+  return result;
+}
+
+QList<VideoEncoderCapability>
+parseVideoEncoderCapabilities(const QString &output) {
+  QList<VideoEncoderCapability> result;
+  bool inList = false;
+  static const QRegularExpression pattern(
+      "\\A\\s*--video-codec=(h264|h265|av1)\\s+"
+      "--video-encoder=([^\\s]+)(?:\\s+(.*))?\\z");
+  for (const auto &raw : output.split('\n')) {
+    const auto line = raw.trimmed();
+    if (line.contains("List of video encoders:")) {
+      inList = true;
+      continue;
+    }
+    if (!inList)
+      continue;
+    if (line.startsWith("List of "))
+      break;
+    const auto match = pattern.match(raw);
+    if (match.hasMatch())
+      result.append(
+          {match.captured(1), match.captured(2), match.captured(3).trimmed()});
+  }
+  return result;
+}
+
 QStringList mirrorArguments(const QString &serial, const Preferences &p,
                             const QString &recording) {
   const bool camera =

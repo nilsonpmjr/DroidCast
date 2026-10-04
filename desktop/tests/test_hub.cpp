@@ -72,6 +72,37 @@ private slots:
     QVERIFY(parseCameraCapabilities("List of cameras:\n malformed").isEmpty());
     QVERIFY(parseCameraCapabilities("--camera-id=0 (back, 1x1)").isEmpty());
   }
+  void parsesDisplayAndEncoderCapabilitiesDefensively() {
+    const QString report =
+        "prefix\nList of displays:\n"
+        "  --display-id=0    (1080x2400)\n"
+        "  --display-id=12    (size unknown)\n"
+        " malformed\nList of video encoders:\n"
+        " --video-codec=h264 --video-encoder=c2.android.avc.encoder"
+        "   (hw) [vendor]\n"
+        " --video-codec=h265 --video-encoder=OMX.vendor.hevc (hybrid)\n"
+        " --video-codec=av1 --video-encoder=c2.android.av1.encoder (sw)\n"
+        " invalid\nList of cameras:\n"
+        " --display-id=99 (1x1)\n"
+        " --video-codec=h264 --video-encoder=ignored\n";
+    const auto displays = parseDisplayCapabilities(report);
+    QCOMPARE(displays.size(), 2);
+    QCOMPARE(displays[0].id, 0);
+    QCOMPARE(displays[0].size, QString("1080x2400"));
+    QCOMPARE(displays[1].id, 12);
+    QCOMPARE(displays[1].size, QString("size unknown"));
+    const auto encoders = parseVideoEncoderCapabilities(report);
+    QCOMPARE(encoders.size(), 3);
+    QCOMPARE(encoders[0].codec, QString("h264"));
+    QCOMPARE(encoders[0].name, QString("c2.android.avc.encoder"));
+    QCOMPARE(encoders[0].attributes, QString("(hw) [vendor]"));
+    QCOMPARE(encoders[1].codec, QString("h265"));
+    QCOMPARE(encoders[2].codec, QString("av1"));
+    QVERIFY(parseDisplayCapabilities("List of displays:\n (none)").isEmpty());
+    QVERIFY(parseVideoEncoderCapabilities("List of video encoders:\n malformed")
+                .isEmpty());
+    QVERIFY(parseDisplayCapabilities("--display-id=0 (1x1)").isEmpty());
+  }
   void cameraArgumentsValidationAndDependencies() {
     Preferences prefs;
     prefs.size = 1080;

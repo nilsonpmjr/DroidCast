@@ -247,3 +247,16 @@ device compatibility testing remain open.
   old-engine behavior, wrong mode/read-only, unavailable responses, timeout isolation,
   clean stop and UI context. Physical Android behavior remains in the release-proof
   list.
+
+## Part 12: display and encoder capability foundation
+
+- Added bounded parsers for the existing inspection report's display IDs/sizes and
+  video codec/encoder records, including hardware/vendor/alias annotations.
+- Parsing begins only at the matching report heading and stops at the next list, so
+  malformed lines and similarly shaped data in later sections cannot leak into the
+  result.
+- Tests cover multiple displays, unknown display size, H.264/H.265/AV1 encoders,
+  attributes, malformed/empty lists and section isolation.
+- This part intentionally does not change settings UI yet. Guided selectors, manual
+  fallback write-through, target-scoped caching and layout/accessibility tests remain
+  the next bounded implementation step.

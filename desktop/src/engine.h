@@ -28,6 +28,17 @@ struct CameraCapability {
 };
 QList<CameraCapability> parseCameraCapabilities(const QString &output);
 
+struct DisplayCapability {
+  int id;
+  QString size;
+};
+struct VideoEncoderCapability {
+  QString codec, name, attributes;
+};
+QList<DisplayCapability> parseDisplayCapabilities(const QString &output);
+QList<VideoEncoderCapability>
+parseVideoEncoderCapabilities(const QString &output);
+
 struct Preferences {
   QString adb = "adb", scrcpy = "scrcpy", server;
   int size = 1080, fps = 60, bitrate = 8;
