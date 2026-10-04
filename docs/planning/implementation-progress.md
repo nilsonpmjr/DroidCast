@@ -156,5 +156,29 @@ and automatic capability-driven selectors were future slices at this checkpoint.
   guards. Linux automated tests do not prove camera availability or supported
   size/rate combinations; Android 12+ hardware testing remains required.
 
-This advances ticket 21. Live torch/zoom controls, automatic structured camera
-selectors and physical-device compatibility testing remain future work.
+This advances ticket 21. Live torch/zoom controls were deferred to the next
+slice; automatic structured selectors and hardware testing remained open.
+
+## Part 8: live camera controls
+
+- Extended the opt-in private bridge with explicit camera capability and result
+  events. Whitelisted bytes reach scrcpy's SDL thread and then its existing Android
+  control-message queue; no global shortcuts or shell commands are synthesized.
+- Added contextual Torch on/off and Zoom out/in controls to the active-session
+  workspace. The group appears only for a running camera session, remains disabled
+  until first-frame capability readiness, and is inaccessible in read-only mode.
+- Results deliberately say that a request was sent. Queue acceptance cannot prove
+  that a specific camera HAL physically changed torch or zoom, so DroidCast does
+  not display an optimistic state or an invented zoom level.
+- Camera and mirror-window commands share a single in-flight slot. Requests are
+  never retried automatically. A two-second camera timeout disables only camera
+  actions for that session; window controls and Stop remain available.
+- Zoom requests while the mirrored image is paused return unavailable, matching
+  scrcpy's own shortcut behavior. Torch requests remain independent of pause.
+- Verification covers all four command bytes, readiness, read-only behavior,
+  unavailable responses, timeout isolation, older bridges, contextual UI visibility
+  and accessible action names. Real torch/zoom behavior still needs Android 12+
+  hardware validation.
+
+This further advances ticket 21. Structured capability selectors and physical
+device compatibility testing remain open.

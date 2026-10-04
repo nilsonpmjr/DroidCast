@@ -128,6 +128,114 @@ private slots:
     QVERIFY(!engine.cameraSession());
     QVERIFY(engine.captureAllowed("PHONE123"));
   }
+  void liveCameraCommandsRequireCapabilityAndControl() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.options["video-source"] = "camera";
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy feedback(&engine, &Engine::cameraControlMessage);
+    QVERIFY(!engine.cameraControlsAvailable());
+    engine.cameraAction(Engine::CameraAction::TorchOn);
+    QVERIFY(feedback.last().first().toString().contains("active camera"));
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY_WITH_TIMEOUT(engine.cameraControlsAvailable(), 3000);
+    for (const auto action :
+         {Engine::CameraAction::TorchOn, Engine::CameraAction::TorchOff,
+          Engine::CameraAction::ZoomOut, Engine::CameraAction::ZoomIn}) {
+      engine.cameraAction(action);
+      QVERIFY(!engine.cameraControlsAvailable());
+      QTRY_VERIFY_WITH_TIMEOUT(engine.cameraControlsAvailable(), 3000);
+      QVERIFY(feedback.last().first().toString().contains("request sent"));
+    }
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    engine.preferences.options["no-control"] = true;
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE_WITH_TIMEOUT(engine.sessionState(),
+                              Engine::SessionState::Streaming, 3000);
+    QVERIFY(!engine.cameraControlsAvailable());
+    engine.cameraAction(Engine::CameraAction::ZoomIn);
+    QVERIFY(feedback.last().first().toString().contains("read-only"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+    engine.preferences.options["no-control"] = false;
+
+    qputenv("HUB_TEST_MODE", "camera-unavailable");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.cameraControlsAvailable());
+    engine.cameraAction(Engine::CameraAction::TorchOn);
+    QTRY_VERIFY(engine.cameraControlsAvailable());
+    QVERIFY(feedback.last().first().toString().contains("unavailable"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    qputenv("HUB_TEST_MODE", "camera-timeout");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.cameraControlsAvailable());
+    engine.cameraAction(Engine::CameraAction::ZoomOut);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        feedback.last().first().toString().contains("No confirmation"), 4000);
+    QVERIFY(!engine.cameraControlsAvailable());
+    QVERIFY(engine.windowControlsAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    qputenv("HUB_TEST_MODE", "old-camera-bridge");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    QVERIFY(engine.windowControlsAvailable());
+    QVERIFY(!engine.cameraControlsAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+  }
+  void cameraSessionPanelIsContextualAndActionable() {
+    QSettings settings;
+    auto prefs = bundledPreferences();
+    prefs.options["video-source"] = "camera";
+    prefs.save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(1);
+    auto *panel = window.findChild<QWidget *>("cameraControlsPanel");
+    auto *feedback = window.findChild<QLabel *>("cameraControlFeedback");
+    QVERIFY(panel && feedback);
+    QList<QPushButton *> controls;
+    QPushButton *torchOn = nullptr;
+    for (auto *button : window.findChildren<QPushButton *>()) {
+      if (!button->property("cameraControl").toBool())
+        continue;
+      controls.append(button);
+      QVERIFY(!button->isEnabled());
+      QVERIFY(button->accessibleName().startsWith("Camera:"));
+      if (button->text() == "Torch on")
+        torchOn = button;
+    }
+    QCOMPARE(controls.size(), 4);
+    QVERIFY(torchOn);
+    QVERIFY(panel->isHidden());
+    auto *start = window.findChild<QPushButton *>("startMirror");
+    QTRY_VERIFY(start->isEnabled());
+    start->click();
+    QTRY_VERIFY(!panel->isHidden());
+    QTRY_VERIFY(torchOn->isEnabled());
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    torchOn->click();
+    QTRY_VERIFY(feedback->text().contains("request sent"));
+    QTRY_VERIFY(torchOn->isEnabled());
+    for (auto *button : window.findChildren<QPushButton *>())
+      if (button->property("phoneControl").toBool())
+        QVERIFY(!button->isEnabled());
+    window.findChild<QPushButton *>("stopMirror")->click();
+    QTRY_VERIFY(start->isEnabled());
+    QVERIFY(panel->isHidden());
+    prefs.options.clear();
+    prefs.save(settings);
+  }
   void cameraControlsFollowTheSelectedSource() {
     QSettings settings;
     bundledPreferences().save(settings);

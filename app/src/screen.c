@@ -953,6 +953,9 @@ sc_screen_apply_frame(struct sc_screen *screen, bool can_resize) {
 
     sc_screen_render(screen, false);
     sc_desktop_bridge_first_frame();
+    if (screen->camera) {
+        sc_desktop_bridge_camera_controls_ready();
+    }
     return true;
 }
 
@@ -1138,6 +1141,38 @@ sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
     switch (event->type) {
         case SC_EVENT_DESKTOP_WINDOW_COMMAND: {
             char command = (char) event->user.code;
+            bool camera_command = command == 'T' || command == 't'
+                               || command == '+' || command == '-';
+            if (camera_command) {
+                bool available = screen->camera && screen->controller
+                              && !screen->disconnected
+                              && ((command != '+' && command != '-')
+                                  || !screen->paused);
+                bool handled = false;
+                if (available) {
+                    switch (command) {
+                        case 'T':
+                        case 't':
+                            handled = sc_input_manager_camera_set_torch(
+                                &screen->im, command == 'T');
+                            break;
+                        case '+':
+                            handled = sc_input_manager_camera_zoom_in(
+                                &screen->im);
+                            break;
+                        case '-':
+                            handled = sc_input_manager_camera_zoom_out(
+                                &screen->im);
+                            break;
+                        default: break;
+                    }
+                }
+                char result[64];
+                snprintf(result, sizeof(result), "camera-result:%c:%s",
+                         command, handled ? "handled" : "unavailable");
+                sc_desktop_bridge_report(result);
+                return;
+            }
             bool available = screen->video && screen->window_shown
                           && !screen->disconnected;
             if (available && (command == 'W' || command == 'Z')

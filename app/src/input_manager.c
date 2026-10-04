@@ -303,41 +303,47 @@ reset_video(struct sc_input_manager *im) {
     }
 }
 
-static void
-camera_set_torch(struct sc_input_manager *im, bool on) {
+bool
+sc_input_manager_camera_set_torch(struct sc_input_manager *im, bool on) {
     assert(im->controller && im->camera);
 
     struct sc_control_msg msg;
     msg.type = SC_CONTROL_MSG_TYPE_CAMERA_SET_TORCH;
     msg.camera_set_torch.on = on;
 
-    if (!sc_controller_push_msg(im->controller, &msg)) {
+    bool ok = sc_controller_push_msg(im->controller, &msg);
+    if (!ok) {
         LOGW("Could not request setting camera torch");
     }
+    return ok;
 }
 
-static void
-camera_zoom_in(struct sc_input_manager *im) {
+bool
+sc_input_manager_camera_zoom_in(struct sc_input_manager *im) {
     assert(im->controller && im->camera);
 
     struct sc_control_msg msg;
     msg.type = SC_CONTROL_MSG_TYPE_CAMERA_ZOOM_IN;
 
-    if (!sc_controller_push_msg(im->controller, &msg)) {
+    bool ok = sc_controller_push_msg(im->controller, &msg);
+    if (!ok) {
         LOGW("Could not request camera zoom in");
     }
+    return ok;
 }
 
-static void
-camera_zoom_out(struct sc_input_manager *im) {
+bool
+sc_input_manager_camera_zoom_out(struct sc_input_manager *im) {
     assert(im->controller && im->camera);
 
     struct sc_control_msg msg;
     msg.type = SC_CONTROL_MSG_TYPE_CAMERA_ZOOM_OUT;
 
-    if (!sc_controller_push_msg(im->controller, &msg)) {
+    bool ok = sc_controller_push_msg(im->controller, &msg);
+    if (!ok) {
         LOGW("Could not request camera zoom out");
     }
+    return ok;
 }
 
 static void
@@ -650,19 +656,19 @@ sc_input_manager_process_key(struct sc_input_manager *im,
             switch (sdl_keycode) {
                 case SDLK_T:
                     if (!repeat && down) {
-                        camera_set_torch(im, !shift);
+                        sc_input_manager_camera_set_torch(im, !shift);
                     }
                     return;
                 case SDLK_DOWN:
                     if (!shift && down && !paused) {
                         // forward repeated events
-                        camera_zoom_out(im);
+                        sc_input_manager_camera_zoom_out(im);
                     }
                     return;
                 case SDLK_UP:
                     if (!shift && down && !paused) {
                         // forward repeated events
-                        camera_zoom_in(im);
+                        sc_input_manager_camera_zoom_in(im);
                     }
                     return;
             }

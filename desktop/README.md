@@ -64,6 +64,9 @@ Windows/macOS build paths have not yet been exercised.
   Window controls provide fullscreen, fit/pixel-perfect sizing, rotation and
   pause/resume through the fork. Pausing freezes only the computer image; audio
   and recording continue. These host-only controls also work in read-only mode.
+  Camera sessions reveal contextual torch on/off and relative zoom controls.
+  They use scrcpy's Android control channel, so they are unavailable in read-only
+  mode and report requests rather than assuming the hardware accepted them.
 - **Wireless pairing:** six-digit pairing code and separate pairing/connection
   addresses. Codes go through stdin and are never saved.
 - **Recordings & captures:** actual local PNG, MKV and MP4 files, type filters,
@@ -143,6 +146,6 @@ vector icons, keyboard-operable switches and constrained content widths keep the
 layout usable across desktop sizes. The original TS project remains untouched.
 
 Next: validate display, virtual-display and camera sessions with physical devices;
-expand the private engine bridge with live camera tools and Android control-channel
-actions; integrate live video into the workspace; add per-device profiles and
-concurrent sessions; then finish standalone platform installers.
+expand the private engine bridge with more Android control-channel actions;
+integrate live video into the workspace; add per-device profiles and concurrent
+sessions; then finish standalone platform installers.

@@ -81,6 +81,9 @@ public:
   };
   void windowAction(WindowAction action);
   bool windowControlsAvailable() const;
+  enum class CameraAction { TorchOn, TorchOff, ZoomIn, ZoomOut };
+  void cameraAction(CameraAction action);
+  bool cameraControlsAvailable() const;
   enum class SessionState {
     Idle,
     Starting,
@@ -112,6 +115,8 @@ signals:
   void deviceTaskChanged();
   void windowControlsChanged();
   void windowControlMessage(const QString &text);
+  void cameraControlsChanged();
+  void cameraControlMessage(const QString &text);
   void captureSaved(const QString &path);
   void message(const QString &text);
   void log(const QString &text);
@@ -138,6 +143,7 @@ private:
   QByteArray sessionToken, mirrorOutput;
   QTimer windowCommandTimeout;
   bool windowCommandsReady = false, windowCommandsHealthy = true;
+  bool cameraCommandsReady = false, cameraCommandsHealthy = true;
   char pendingWindowCommand = 0;
   void readMirrorOutput();
   QByteArray scanOutput, wirelessOutput, pairingInput;

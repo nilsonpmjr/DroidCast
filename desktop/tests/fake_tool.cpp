@@ -101,8 +101,12 @@ int main(int argc, char **argv) {
   if (mode != "no-frame")
     QTimer::singleShot(100, &app, [&] {
       report("first-frame");
-      if (mode != "old-bridge")
+      if (mode != "old-bridge") {
         report("window-controls-ready");
+        if (args.contains("--video-source=camera") &&
+            mode != "old-camera-bridge")
+          report("camera-controls-ready");
+      }
     });
   if (mode == "disconnect")
     QTimer::singleShot(250, &app, [&] {
@@ -130,6 +134,14 @@ int main(int argc, char **argv) {
       if (mode != "window-timeout")
         report(QString("window-result:%1:%2")
                    .arg(QChar(command), mode == "window-unavailable"
+                                            ? "unavailable"
+                                            : "handled"));
+      return;
+    }
+    if (QByteArray("Tt+-").contains(command)) {
+      if (mode != "camera-timeout")
+        report(QString("camera-result:%1:%2")
+                   .arg(QChar(command), mode == "camera-unavailable"
                                             ? "unavailable"
                                             : "handled"));
       return;

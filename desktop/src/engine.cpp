@@ -746,12 +746,22 @@ Engine::Engine(QObject *parent) : QObject(parent) {
           });
   windowCommandTimeout.setSingleShot(true);
   connect(&windowCommandTimeout, &QTimer::timeout, this, [this] {
+    const bool cameraCommand =
+        QByteArray("Tt+-").contains(pendingWindowCommand);
     pendingWindowCommand = 0;
-    windowCommandsHealthy = false;
-    emit windowControlMessage(
-        "No confirmation from the mirror. Restart the session to re-enable "
-        "window controls; no command was retried.");
+    if (cameraCommand) {
+      cameraCommandsHealthy = false;
+      emit cameraControlMessage(
+          "No confirmation from the camera. Restart the session to re-enable "
+          "camera controls; no command was retried.");
+    } else {
+      windowCommandsHealthy = false;
+      emit windowControlMessage(
+          "No confirmation from the mirror. Restart the session to re-enable "
+          "window controls; no command was retried.");
+    }
     emit windowControlsChanged();
+    emit cameraControlsChanged();
   });
   scanTimeout.setSingleShot(true);
   wirelessTimeout.setSingleShot(true);
@@ -1094,9 +1104,15 @@ bool Engine::start(const QString &serial, const QString &recording) {
   state = SessionState::Starting;
   windowCommandsReady = false;
   windowCommandsHealthy = true;
+  cameraCommandsReady = false;
+  cameraCommandsHealthy = true;
   pendingWindowCommand = 0;
   emit windowControlMessage(
       "Window controls become available after the first video frame.");
+  emit cameraControlMessage(
+      activeCamera ? "Camera controls become available after the "
+                     "first video frame."
+                   : "Start a camera session to use these controls.");
   forcedStop = bridgeReady = recordingFinalized = recordingFailed = false;
   mirrorOutput.clear();
   sessionToken = QUuid::createUuid().toString(QUuid::Id128).toLatin1();
@@ -1172,6 +1188,15 @@ void Engine::readMirrorOutput() {
                                       "changes the Android virtual display."
                                     : "Window controls ready. These actions "
                                       "affect the computer display only.");
+    } else if (event == "camera-controls-ready" && bridgeReady &&
+               activeCamera) {
+      cameraCommandsReady = true;
+      emit cameraControlMessage(
+          activeReadOnly
+              ? "Camera controls are disabled in read-only mode."
+              : "Camera controls ready. Requests are sent to the phone; "
+                "hardware support still varies.");
+      emit cameraControlsChanged();
     } else if (event.startsWith("window-result:") && bridgeReady &&
                pendingWindowCommand) {
       const QByteArray expected =
@@ -1189,6 +1214,26 @@ void Engine::readMirrorOutput() {
             : command == 'U' ? "Mirror image resumed."
                              : "Window request handled by the mirror. "
                                "Window-manager restrictions may still apply.");
+        emit windowControlsChanged();
+      }
+    } else if (event.startsWith("camera-result:") && bridgeReady &&
+               pendingWindowCommand) {
+      const QByteArray expected =
+          QByteArray("camera-result:") + pendingWindowCommand + ':';
+      if (event == expected + "handled" || event == expected + "unavailable") {
+        windowCommandTimeout.stop();
+        const bool handled = event.endsWith(":handled");
+        const char command = pendingWindowCommand;
+        pendingWindowCommand = 0;
+        emit cameraControlMessage(
+            !handled
+                ? "This camera action is unavailable. Resume a paused image "
+                  "or check session control permissions."
+            : command == 'T' ? "Torch-on request sent to the phone."
+            : command == 't' ? "Torch-off request sent to the phone."
+            : command == '+' ? "Zoom-in request sent to the phone."
+                             : "Zoom-out request sent to the phone.");
+        emit cameraControlsChanged();
         emit windowControlsChanged();
       }
     } else if (event == "recording-finalized" && bridgeReady)
@@ -1254,6 +1299,52 @@ void Engine::windowAction(WindowAction action) {
     windowCommandTimeout.start(2000);
     emit windowControlMessage("Waiting for the mirror to handle the request…");
   }
+  emit windowControlsChanged();
+}
+
+bool Engine::cameraControlsAvailable() const {
+  return running() && state == SessionState::Streaming && activeCamera &&
+         !activeReadOnly && cameraCommandsReady && cameraCommandsHealthy &&
+         !pendingWindowCommand;
+}
+
+void Engine::cameraAction(CameraAction action) {
+  if (!cameraControlsAvailable()) {
+    emit cameraControlMessage(
+        !cameraSession() ? "Camera controls require an active camera session."
+        : activeReadOnly
+            ? "Camera controls are disabled in read-only mode."
+            : "Camera controls are waiting for the stream or another request.");
+    return;
+  }
+  char command;
+  switch (action) {
+  case CameraAction::TorchOn:
+    command = 'T';
+    break;
+  case CameraAction::TorchOff:
+    command = 't';
+    break;
+  case CameraAction::ZoomIn:
+    command = '+';
+    break;
+  case CameraAction::ZoomOut:
+    command = '-';
+    break;
+  default:
+    return;
+  }
+  pendingWindowCommand = command;
+  if (mirror.write(&command, 1) != 1) {
+    pendingWindowCommand = 0;
+    cameraCommandsHealthy = false;
+    emit cameraControlMessage(
+        "Could not send the camera request. Restart the session.");
+  } else {
+    windowCommandTimeout.start(2000);
+    emit cameraControlMessage("Waiting for the camera to handle the request…");
+  }
+  emit cameraControlsChanged();
   emit windowControlsChanged();
 }
 

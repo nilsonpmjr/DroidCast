@@ -73,4 +73,13 @@ void
 sc_input_manager_handle_event(struct sc_input_manager *im,
                               const SDL_Event *event);
 
+bool
+sc_input_manager_camera_set_torch(struct sc_input_manager *im, bool on);
+
+bool
+sc_input_manager_camera_zoom_in(struct sc_input_manager *im);
+
+bool
+sc_input_manager_camera_zoom_out(struct sc_input_manager *im);
+
 #endif

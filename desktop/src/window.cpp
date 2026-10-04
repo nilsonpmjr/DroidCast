@@ -362,6 +362,49 @@ QWidget *Window::sessionPage() {
             });
   }
   preview->addLayout(phoneControls);
+  auto *cameraPanel = new QWidget;
+  cameraPanel->setObjectName("cameraControlsPanel");
+  auto *cameraLayout = new QVBoxLayout(cameraPanel);
+  cameraLayout->setContentsMargins(0, 6, 0, 0);
+  cameraLayout->setSpacing(8);
+  cameraLayout->addWidget(label("Camera controls", "section"));
+  cameraLayout->addWidget(
+      label("Control torch and zoom on the active phone camera. Availability "
+            "depends on the camera.",
+            "muted"));
+  auto *cameraControls = new QGridLayout;
+  cameraControls->setSpacing(8);
+  int cameraIndex = 0;
+  for (const auto &entry :
+       {qMakePair(QString("Torch on"), Engine::CameraAction::TorchOn),
+        qMakePair(QString("Torch off"), Engine::CameraAction::TorchOff),
+        qMakePair(QString("Zoom out"), Engine::CameraAction::ZoomOut),
+        qMakePair(QString("Zoom in"), Engine::CameraAction::ZoomIn)}) {
+    auto *control = button(entry.first);
+    control->setProperty("cameraControl", true);
+    control->setAccessibleName("Camera: " + entry.first);
+    control->setToolTip(entry.first + " on the active phone camera.");
+    control->setMinimumHeight(40);
+    cameraControls->addWidget(control, cameraIndex / 2, cameraIndex % 2);
+    ++cameraIndex;
+    connect(control, &QPushButton::clicked, this,
+            [this, action = entry.second] { engine.cameraAction(action); });
+  }
+  cameraLayout->addLayout(cameraControls);
+  auto *cameraFeedback =
+      label("Start a camera session to use these controls.", "muted");
+  cameraFeedback->setObjectName("cameraControlFeedback");
+  cameraLayout->addWidget(cameraFeedback);
+  cameraPanel->hide();
+  preview->addWidget(cameraPanel);
+  connect(&engine, &Engine::cameraControlMessage, cameraFeedback,
+          &QLabel::setText);
+  connect(&engine, &Engine::cameraControlsChanged, this,
+          &Window::updateActions);
+  connect(&engine, &Engine::sessionChanged, this, [this, cameraFeedback] {
+    if (!engine.cameraSession())
+      cameraFeedback->setText("Start a camera session to use these controls.");
+  });
   preview->addWidget(label("Mirror window", "section"));
   preview->addWidget(
       label("Window presentation controls. In resizable virtual-display mode, "
@@ -1097,6 +1140,8 @@ void Window::updateActions() {
       control->setEnabled(screenshotButton->isEnabled() &&
                           engine.controlAllowed() &&
                           !engine.usesAlternateDisplay());
+    else if (control->property("cameraControl").toBool())
+      control->setEnabled(engine.cameraControlsAvailable());
     else if (control->property("windowControl").toBool())
       control->setEnabled(engine.windowControlsAvailable());
     else if (control->property("inspectDevice").toBool())
@@ -1107,6 +1152,8 @@ void Window::updateActions() {
       control->setEnabled(
           control->property("captureReady").toBool() && !engine.deviceBusy() &&
           engine.captureAllowed(control->property("captureSerial").toString()));
+  if (auto *cameraPanel = findChild<QWidget *>("cameraControlsPanel"))
+    cameraPanel->setVisible(engine.cameraSession());
   if (state == "unauthorized")
     deviceHelp->setText("Unlock your phone and accept the USB debugging "
                         "prompt. Devices refresh automatically.");
