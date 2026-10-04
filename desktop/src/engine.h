@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QMap>
 #include <QObject>
 #include <QProcess>
 #include <QSettings>
@@ -19,6 +20,13 @@ struct Device {
   QString serial, state, model, connection;
   bool ready() const { return state == "device"; }
 };
+
+struct CameraCapability {
+  QString id, facing, sensorSize, zoomRange;
+  QStringList frameRates, sizes;
+  QMap<QString, QStringList> highSpeedFrameRates;
+};
+QList<CameraCapability> parseCameraCapabilities(const QString &output);
 
 struct Preferences {
   QString adb = "adb", scrcpy = "scrcpy", server;

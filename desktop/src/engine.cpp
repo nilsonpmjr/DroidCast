@@ -571,6 +571,67 @@ QList<Device> parseDevices(const QString &output) {
   return devices;
 }
 
+QList<CameraCapability> parseCameraCapabilities(const QString &output) {
+  QList<CameraCapability> cameras;
+  bool inCameraList = false, highSpeed = false;
+  static const QRegularExpression cameraPattern(
+      "\\A\\s*--camera-id=([^\\s]+)\\s+\\(([^,]+),\\s*([0-9]+x[0-9]+)"
+      "(?:,\\s*fps=\\{([^}]*)\\})?(?:,\\s*zoom-range=(\\[[^]]+\\]))?\\)\\s*"
+      "\\z");
+  static const QRegularExpression sizePattern(
+      "\\A\\s*-\\s*([0-9]+x[0-9]+)(?:\\s+\\(fps=\\{([^}]*)\\}\\))?\\s*\\z");
+  auto rates = [](const QString &text) {
+    QStringList result;
+    for (const auto &rate : text.split(',', Qt::SkipEmptyParts)) {
+      const auto trimmed = rate.trimmed();
+      bool ok = false;
+      const int value = trimmed.toInt(&ok);
+      if (ok && value > 0 && !result.contains(QString::number(value)))
+        result.append(QString::number(value));
+    }
+    return result;
+  };
+  for (const auto &raw : output.split('\n')) {
+    const auto line = raw.trimmed();
+    if (line.contains("List of cameras:")) {
+      inCameraList = true;
+      highSpeed = false;
+      continue;
+    }
+    if (!inCameraList)
+      continue;
+    if (line.startsWith("List of "))
+      break;
+    const auto camera = cameraPattern.match(raw);
+    if (camera.hasMatch()) {
+      cameras.append({camera.captured(1),
+                      camera.captured(2).trimmed(),
+                      camera.captured(3),
+                      camera.captured(5),
+                      rates(camera.captured(4)),
+                      {},
+                      {}});
+      highSpeed = false;
+      continue;
+    }
+    if (line.startsWith("High speed capture")) {
+      highSpeed = true;
+      continue;
+    }
+    if (cameras.isEmpty())
+      continue;
+    const auto size = sizePattern.match(raw);
+    if (!size.hasMatch())
+      continue;
+    if (highSpeed)
+      cameras.last().highSpeedFrameRates.insert(size.captured(1),
+                                                rates(size.captured(2)));
+    else if (!cameras.last().sizes.contains(size.captured(1)))
+      cameras.last().sizes.append(size.captured(1));
+  }
+  return cameras;
+}
+
 QStringList mirrorArguments(const QString &serial, const Preferences &p,
                             const QString &recording) {
   const bool camera =

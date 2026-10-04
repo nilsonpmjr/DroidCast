@@ -47,6 +47,31 @@ private slots:
     applyTheme(*qobject_cast<QApplication *>(QCoreApplication::instance()));
   }
   void init() { qunsetenv("HUB_TEST_MODE"); }
+  void parsesStructuredCameraCapabilitiesDefensively() {
+    const auto cameras = parseCameraCapabilities(
+        "noise before report\nList of cameras:\n"
+        "    --camera-id=0    (back, 4000x3000, fps={30, 60}, "
+        "zoom-range=[1, 8])\n"
+        "        - 1920x1080\n        - 1280x720\n"
+        "      High speed capture (--camera-high-speed):\n"
+        "        - 1280x720 (fps={120, 240})\n"
+        "    --camera-id=front-main    (front, 3200x2400, fps={30})\n"
+        "        - 1280x720\nList of apps:\nignored\n");
+    QCOMPARE(cameras.size(), 2);
+    QCOMPARE(cameras[0].id, QString("0"));
+    QCOMPARE(cameras[0].facing, QString("back"));
+    QCOMPARE(cameras[0].sensorSize, QString("4000x3000"));
+    QCOMPARE(cameras[0].zoomRange, QString("[1, 8]"));
+    QCOMPARE(cameras[0].frameRates, QStringList({"30", "60"}));
+    QCOMPARE(cameras[0].sizes, QStringList({"1920x1080", "1280x720"}));
+    QCOMPARE(cameras[0].highSpeedFrameRates.value("1280x720"),
+             QStringList({"120", "240"}));
+    QCOMPARE(cameras[1].id, QString("front-main"));
+    QCOMPARE(cameras[1].frameRates, QStringList({"30"}));
+    QVERIFY(parseCameraCapabilities("List of cameras:\n    (none)").isEmpty());
+    QVERIFY(parseCameraCapabilities("List of cameras:\n malformed").isEmpty());
+    QVERIFY(parseCameraCapabilities("--camera-id=0 (back, 1x1)").isEmpty());
+  }
   void cameraArgumentsValidationAndDependencies() {
     Preferences prefs;
     prefs.size = 1080;
@@ -276,6 +301,67 @@ private slots:
     QVERIFY(virtualDisplay->isEnabled());
     QVERIFY(maxSize->isEnabled());
     QVERIFY(window.findChild<QLabel *>("error-camera-size")->isHidden());
+    bundledPreferences().save(settings);
+  }
+  void cameraInspectionPopulatesGuidedSelectors() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(5);
+    auto *category = window.findChild<QComboBox *>("settingsCategory");
+    auto *source = window.findChild<QComboBox *>("option-video-source");
+    auto *camera = window.findChild<QComboBox *>("detectedCamera");
+    auto *size = window.findChild<QComboBox *>("detectedCameraSize");
+    auto *fps = window.findChild<QComboBox *>("detectedCameraFps");
+    auto *idField = window.findChild<QLineEdit *>("option-camera-id");
+    auto *sizeField = window.findChild<QLineEdit *>("option-camera-size");
+    auto *highSpeed = window.findChild<QCheckBox *>("option-camera-high-speed");
+    QVERIFY(category && source && camera && size && fps && idField &&
+            sizeField && highSpeed);
+    category->setCurrentText("Camera");
+    source->setCurrentText("camera");
+    QVERIFY(!camera->isEnabled());
+    auto *inspect = window.findChild<QPushButton *>("inspectCamera");
+    QTRY_VERIFY(inspect->isEnabled());
+    inspect->click();
+    QTRY_COMPARE(camera->count(), 2);
+    QVERIFY(camera->isEnabled());
+    QCOMPARE(camera->itemData(1).toString(), QString("0"));
+    camera->setCurrentIndex(1);
+    QMetaObject::invokeMethod(camera, "activated", Qt::DirectConnection,
+                              Q_ARG(int, 1));
+    QCOMPARE(idField->text(), QString("0"));
+    QVERIFY(size->findData("1920x1080") > 0);
+    const int sizeIndex = size->findData("1920x1080");
+    size->setCurrentIndex(sizeIndex);
+    QMetaObject::invokeMethod(size, "activated", Qt::DirectConnection,
+                              Q_ARG(int, sizeIndex));
+    QCOMPARE(sizeField->text(), QString("1920x1080"));
+    QVERIFY(fps->findData(60) > 0);
+    highSpeed->setChecked(true);
+    QCOMPARE(size->count(), 2);
+    QCOMPARE(size->itemData(1).toString(), QString("1280x720"));
+    QCOMPARE(fps->count(), 1);
+    size->setCurrentIndex(1);
+    QMetaObject::invokeMethod(size, "activated", Qt::DirectConnection,
+                              Q_ARG(int, 1));
+    QCOMPARE(sizeField->text(), QString("1280x720"));
+    QVERIFY(fps->findData(120) > 0);
+    QVERIFY(fps->findData(240) > 0);
+    QCOMPARE(fps->findData(60), -1);
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    idField->setText("manual-vendor-id");
+    QMetaObject::invokeMethod(idField, "editingFinished", Qt::DirectConnection);
+    QCOMPARE(idField->text(), QString("manual-vendor-id"));
+    QCOMPARE(camera->currentIndex(), 0);
+    window.findChild<QListWidget *>("devices")->setCurrentRow(1);
+    QCOMPARE(camera->count(), 1);
+    QVERIFY(!camera->isEnabled());
     bundledPreferences().save(settings);
   }
   void virtualDisplayArgumentsAndValidation() {

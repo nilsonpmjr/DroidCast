@@ -32,8 +32,11 @@ private:
   QPushButton *startButton, *recordButton, *stopButton, *refreshButton,
       *screenshotButton, *apkButton, *sessionStop;
   QPlainTextEdit *logs;
-  QComboBox *captureFilter;
-  QString fingerprint;
+  QComboBox *captureFilter, *cameraIdSelector = nullptr,
+                            *cameraSizeSelector = nullptr,
+                            *cameraFpsSelector = nullptr;
+  QString fingerprint, cameraCapabilitySerial;
+  QList<CameraCapability> cameraCapabilities;
   bool closing = false;
   QWidget *devicesPage();
   QWidget *sessionPage();
@@ -46,6 +49,8 @@ private:
   void updateActions();
   void updateCaptures();
   void savePreferences();
+  void setCameraCapabilities(const QString &serial, const QString &report);
+  void updateCameraSelectors();
   void launch(bool record);
   QString selectedSerial() const;
   void captureScreen();

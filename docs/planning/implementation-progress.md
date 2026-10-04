@@ -205,3 +205,23 @@ device compatibility testing remain open.
   an upstream compiler fix; other compilers/configurations are unchanged.
 - Verification covers resource compilation, automated UI tests and visual review
   at 1240×860. Windows/macOS form-factor detection still needs platform testing.
+
+## Part 10: structured camera capability guidance
+
+- Added a defensive parser for the bounded camera inspection report. It extracts
+  camera ID/facing, sensor size, ordinary sizes/FPS, zoom range and declared
+  high-speed size/FPS pairs while ignoring unrelated and malformed output.
+- Added guided camera, size and frame-rate selectors above the existing advanced
+  fields. Selecting a declared value writes through the same validated preference
+  path used by manual entry; the raw report remains visible.
+- Manual fields remain available because Android declarations may omit working
+  values or include combinations that fail. The UI calls them declarations rather
+  than guarantees and does not reject an unlisted manual combination.
+- High-speed mode changes the guided choices to its declared size/rate pairs.
+  Camera/facing choices can still drive automatic selection without forcing an ID.
+- Capability data belongs only to the inspected target. Starting another inspection,
+  choosing another device, receiving malformed/empty output or losing the target
+  clears the guided selectors instead of leaking choices across phones.
+- Tests cover normal multi-camera reports, high-speed pairs, malformed/empty input,
+  selector write-through, manual fallback and target isolation. Real-device proof
+  and Android-version gating remain open.

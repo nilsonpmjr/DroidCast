@@ -28,7 +28,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Audio | Partial | Enablement, source, codec and buffers. | Duplication, encoder/bitrate, require-audio, audio-only and playback policies. |
 | Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior and UHID gamepad. | Mouse bindings, shortcut modifier, AOA modes, gesture help and peripheral tests. |
 | Virtual display | Partial | Creation, size/DPI, flex, package launch, IME, decorations and close policy. | Structured app picker and Android 10+ hardware journeys. |
-| Camera | Partial | Source, ID/facing, size/aspect, FPS/high-speed, startup torch/zoom and live torch/zoom. | Parse inspection into selectors, Android-version/capability gates and real camera tests. |
+| Camera | Partial | Source, ID/facing, guided declared size/FPS/high-speed choices, manual fallback, startup torch/zoom and live torch/zoom. | Android-version/capability gates and real camera tests. |
 | Recording | Partial | MKV/MP4, rotation, time limit, unique paths and graceful finalization state. | Audio-only/no-playback workflows and playback verification of real files. |
 | Embedded video | Open decision | The engine opens a separate native mirror window. | Decide release scope; prototype a real frame inside Qt before promising it. |
 | OTG | Open | Nothing end to end. | USB discovery without ADB, control-only session model, drivers and hardware tests. |
@@ -36,27 +36,26 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
 
-## Next implementation: structured camera capabilities
+## Next implementation: Android display and panel actions
 
-This is the next bounded slice. It should not claim hardware support merely because
-Android listed a value.
+This is the next bounded slice for the active-session toolbar. It extends the same
+versioned bridge used by window and camera commands.
 
-1. Parse the bounded `--list-camera-sizes` report into camera records: ID, facing,
-   declared sizes, ordinary frame rates, high-speed size/rate pairs and zoom range.
-2. Keep the raw report available for diagnostics when parsing is incomplete or a
-   vendor changes formatting.
-3. Replace free-text camera ID with a selector when records exist; retain a manual
-   entry fallback so valid but undeclared vendor IDs are still possible.
-4. Populate size and FPS selectors from the selected camera. High-speed mode must
-   show only declared size/rate pairs instead of independent misleading choices.
-5. Preserve current mutual-exclusion rules: ID versus facing, and exact size versus
-   general size/aspect constraints.
-6. Cache results only for the current device connection. Clear them on disconnect,
-   target change or failed inspection.
-7. Test normal, incomplete, malformed and empty reports, target isolation, keyboard
-   access and the 920×680 layout.
-8. Verify on at least one Android 12+ phone. Record which camera/size/FPS combinations
-   actually start, including one unsupported combination and torch/zoom behavior.
+1. Expose scrcpy's existing display-power, notification panel, quick-settings,
+   collapse-panels, device rotation and reset-video actions through named bridge bytes.
+2. Keep host-window rotation separate from Android device rotation in labels and code.
+3. Advertise an explicit Android-actions capability after the controller is ready;
+   older engines must leave the new controls disabled rather than timing out.
+4. Hide camera-incompatible display actions during camera sessions and disable every
+   Android-mutating action in read-only mode.
+5. Serialize requests, acknowledge queueing, apply the existing two-second timeout
+   rule and never retry toggles automatically.
+6. Add accessible toolbar buttons with local feedback and no horizontal overflow at
+   920×680; less frequent actions may live in a compact grouped section.
+7. Test every byte, wrong-mode/read-only behavior, old engines, unavailable results,
+   timeout isolation and clean stop.
+8. Keep clipboard payloads out of this slice; they need a framed variable-length
+   protocol and explicit privacy/logging tests rather than a single command byte.
 
 ## Release-proof still required for recent work
 

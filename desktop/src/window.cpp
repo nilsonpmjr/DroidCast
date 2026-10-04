@@ -25,6 +25,7 @@
 #include <QUrl>
 #include <QUuid>
 #include <QVBoxLayout>
+#include <algorithm>
 
 namespace {
 QLabel *label(const QString &text, const char *role = "body") {
@@ -800,6 +801,47 @@ QWidget *Window::settingsPage() {
     auto *fields = new QFormLayout(group);
     fields->setSpacing(12);
     QString terms = category;
+    if (category == "Camera") {
+      cameraIdSelector = new QComboBox;
+      cameraIdSelector->setObjectName("detectedCamera");
+      cameraIdSelector->setAccessibleName("Detected camera");
+      cameraSizeSelector = new QComboBox;
+      cameraSizeSelector->setObjectName("detectedCameraSize");
+      cameraSizeSelector->setAccessibleName("Declared camera size");
+      cameraFpsSelector = new QComboBox;
+      cameraFpsSelector->setObjectName("detectedCameraFps");
+      cameraFpsSelector->setAccessibleName("Declared camera frame rate");
+      field(fields, "Detected camera", cameraIdSelector);
+      field(fields, "Declared size", cameraSizeSelector);
+      field(fields, "Declared frame rate", cameraFpsSelector);
+      fields->addRow(label(
+          "Inspect the selected phone to populate these choices. Manual fields "
+          "remain available because Android declarations may be incomplete.",
+          "muted"));
+      connect(cameraIdSelector, qOverload<int>(&QComboBox::activated), this,
+              [this](int index) {
+                const auto id = cameraIdSelector->itemData(index).toString();
+                if (!id.isEmpty()) {
+                  findChild<QLineEdit *>("option-camera-id")->setText(id);
+                  updateCameraSelectors();
+                }
+              });
+      connect(cameraSizeSelector, qOverload<int>(&QComboBox::activated), this,
+              [this](int index) {
+                const auto size =
+                    cameraSizeSelector->itemData(index).toString();
+                if (!size.isEmpty()) {
+                  findChild<QLineEdit *>("option-camera-size")->setText(size);
+                  updateCameraSelectors();
+                }
+              });
+      connect(cameraFpsSelector, qOverload<int>(&QComboBox::activated), this,
+              [this](int index) {
+                const int fps = cameraFpsSelector->itemData(index).toInt();
+                if (fps > 0)
+                  findChild<QSpinBox *>("option-camera-fps")->setValue(fps);
+              });
+    }
     for (const auto &option : sessionOptions()) {
       if (option.category != category)
         continue;
@@ -820,6 +862,8 @@ QWidget *Window::settingsPage() {
                 [this, key = option.key](const QString &value) {
                   engine.preferences.options.insert(key, value);
                   savePreferences();
+                  if (key == "video-source" || key == "camera-facing")
+                    updateCameraSelectors();
                 });
         control = combo;
       } else if (option.initial.metaType().id() == QMetaType::QString) {
@@ -837,6 +881,9 @@ QWidget *Window::settingsPage() {
         };
         validate();
         connect(edit, &QLineEdit::editingFinished, this, validate);
+        if (option.key == "camera-id" || option.key == "camera-size")
+          connect(edit, &QLineEdit::editingFinished, this,
+                  &Window::updateCameraSelectors);
         connect(edit, &QLineEdit::textChanged, this,
                 [this, key = option.key](const QString &value) {
                   engine.preferences.options.insert(key, value.trimmed());
@@ -851,6 +898,9 @@ QWidget *Window::settingsPage() {
                   savePreferences();
                   updateActions();
                 });
+        if (option.key == "camera-high-speed")
+          connect(check, &QCheckBox::toggled, this,
+                  &Window::updateCameraSelectors);
         control = check;
       } else {
         auto *spin = new QSpinBox;
@@ -924,8 +974,11 @@ QWidget *Window::settingsPage() {
       connect(cancel, &QPushButton::clicked, &engine,
               &Engine::cancelInspection);
       connect(&engine, &Engine::inspectionResult, report,
-              [report](const QString &serial, const QString &output) {
+              [this, report, cameraReport](const QString &serial,
+                                           const QString &output) {
                 report->setPlainText("Device: " + serial + "\n\n" + output);
+                if (cameraReport)
+                  setCameraCapabilities(serial, output);
               });
       connect(&engine, &Engine::inspectionChanged, this,
               &Window::updateActions);
@@ -935,6 +988,7 @@ QWidget *Window::settingsPage() {
     searchable.append(group);
     layout->addWidget(group);
   }
+  updateCameraSelectors();
   auto *noResults = label("No matching settings in this release.", "muted");
   noResults->hide();
   layout->addWidget(noResults);
@@ -1003,6 +1057,101 @@ QWidget *Window::diagnosticsPage() {
   connect(clear, &QPushButton::clicked, logs, &QPlainTextEdit::clear);
   layout->addWidget(clear);
   return widget;
+}
+void Window::setCameraCapabilities(const QString &serial,
+                                   const QString &report) {
+  if (serial != selectedSerial()) {
+    cameraCapabilitySerial.clear();
+    cameraCapabilities.clear();
+  } else {
+    cameraCapabilities = parseCameraCapabilities(report);
+    cameraCapabilitySerial = cameraCapabilities.isEmpty() ? QString{} : serial;
+  }
+  updateCameraSelectors();
+}
+void Window::updateCameraSelectors() {
+  if (!cameraIdSelector || !cameraSizeSelector || !cameraFpsSelector)
+    return;
+  const QSignalBlocker idBlocker(cameraIdSelector);
+  const QSignalBlocker sizeBlocker(cameraSizeSelector);
+  const QSignalBlocker fpsBlocker(cameraFpsSelector);
+  const auto selectedId =
+      engine.preferences.options.value("camera-id").toString().trimmed();
+  const auto selectedSize =
+      engine.preferences.options.value("camera-size").toString().trimmed();
+  const int selectedFps =
+      engine.preferences.options.value("camera-fps", 0).toInt();
+  cameraIdSelector->clear();
+  cameraIdSelector->addItem(cameraCapabilities.isEmpty()
+                                ? "Inspect phone to discover cameras"
+                                : "Use manual camera ID field below",
+                            QString{});
+  const CameraCapability *capability = nullptr;
+  for (const auto &camera : cameraCapabilities) {
+    cameraIdSelector->addItem(camera.id + " · " + camera.facing + " · " +
+                                  camera.sensorSize,
+                              camera.id);
+    if (camera.id == selectedId)
+      capability = &camera;
+  }
+  if (!capability && selectedId.isEmpty() && !cameraCapabilities.isEmpty()) {
+    const auto facing =
+        engine.preferences.options.value("camera-facing", "auto").toString();
+    for (const auto &camera : cameraCapabilities)
+      if (facing == "auto" || camera.facing == facing) {
+        capability = &camera;
+        break;
+      }
+  }
+  const int cameraIndex = cameraIdSelector->findData(selectedId);
+  cameraIdSelector->setCurrentIndex(qMax(0, cameraIndex));
+
+  cameraSizeSelector->clear();
+  cameraSizeSelector->addItem(capability ? "Use manual size field below"
+                                         : "Select a detected camera first",
+                              QString{});
+  QStringList sizes;
+  if (capability) {
+    const bool highSpeed =
+        engine.preferences.options.value("camera-high-speed", false).toBool();
+    sizes =
+        highSpeed ? capability->highSpeedFrameRates.keys() : capability->sizes;
+    for (const auto &size : sizes)
+      cameraSizeSelector->addItem(size, size);
+  }
+  const int sizeIndex = cameraSizeSelector->findData(selectedSize);
+  cameraSizeSelector->setCurrentIndex(qMax(0, sizeIndex));
+
+  cameraFpsSelector->clear();
+  cameraFpsSelector->addItem(capability ? "Use frame-rate field below"
+                                        : "Select a detected camera first",
+                             0);
+  QStringList frameRates;
+  if (capability &&
+      engine.preferences.options.value("camera-high-speed", false).toBool()) {
+    if (!selectedSize.isEmpty())
+      frameRates = capability->highSpeedFrameRates.value(selectedSize);
+    else
+      for (const auto &rates : capability->highSpeedFrameRates)
+        for (const auto &rate : rates)
+          if (!frameRates.contains(rate))
+            frameRates.append(rate);
+  } else if (capability)
+    frameRates = capability->frameRates;
+  std::sort(
+      frameRates.begin(), frameRates.end(),
+      [](const QString &a, const QString &b) { return a.toInt() < b.toInt(); });
+  for (const auto &rate : frameRates)
+    cameraFpsSelector->addItem(rate + " fps", rate.toInt());
+  const int fpsIndex = cameraFpsSelector->findData(selectedFps);
+  cameraFpsSelector->setCurrentIndex(qMax(0, fpsIndex));
+  const bool cameraMode =
+      engine.preferences.options.value("video-source", "display").toString() ==
+      "camera";
+  const bool found = capability != nullptr;
+  cameraIdSelector->setEnabled(cameraMode && !cameraCapabilities.isEmpty());
+  cameraSizeSelector->setEnabled(cameraMode && found && !sizes.isEmpty());
+  cameraFpsSelector->setEnabled(cameraMode && found && !frameRates.isEmpty());
 }
 void Window::savePreferences() {
   engine.preferences.save(settings);
@@ -1116,6 +1265,12 @@ QString Window::selectedSerial() const {
              : QString{};
 }
 void Window::updateActions() {
+  if (!cameraCapabilitySerial.isEmpty() &&
+      cameraCapabilitySerial != selectedSerial()) {
+    cameraCapabilitySerial.clear();
+    cameraCapabilities.clear();
+    updateCameraSelectors();
+  }
   auto *item = deviceList->currentItem();
   const auto state = item ? item->data(Qt::UserRole + 1).toString() : QString{};
   const bool ready = state == "device";

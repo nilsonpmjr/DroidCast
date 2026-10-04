@@ -32,11 +32,11 @@ int main(int argc, char **argv) {
         << "\nList of displays:\n --display-id=0 (1080x2400)\n"
         << "List of video encoders:\n --video-codec=h264 "
            "--video-encoder=c2.android.avc.encoder\n"
-        << "List of cameras:\n --camera-id=0 (back, 1920x1080, fps=60, "
-           "zoom-range=1.0..8.0)\n"
+        << "List of cameras:\n --camera-id=0 (back, 1920x1080, "
+           "fps={30, 60}, zoom-range=[1, 8])\n"
         << "   - 1920x1080\n   - 1280x720\n"
         << "   High speed capture (--camera-high-speed):\n"
-        << "     - 1280x720 (fps=120)\n";
+        << "     - 1280x720 (fps={120, 240})\n";
     return 0;
   }
   if (args.contains("keyevent")) {
