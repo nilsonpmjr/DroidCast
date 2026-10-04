@@ -11,6 +11,10 @@ int main(int argc, char **argv) {
   const auto mode = qEnvironmentVariable("HUB_TEST_MODE");
   if (mode == "hang")
     return app.exec();
+  if (args.contains("keyevent")) {
+    out << args.join('|');
+    return mode == "command-fail" ? 1 : 0;
+  }
   if (args.contains("screencap")) {
     if (mode == "invalid-png") {
       out << "not a PNG";

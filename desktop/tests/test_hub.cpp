@@ -41,6 +41,85 @@ private slots:
     applyTheme(*qobject_cast<QApplication *>(QCoreApplication::instance()));
   }
   void init() { qunsetenv("HUB_TEST_MODE"); }
+  void advancedSettingsAreValidatedAndPersisted() {
+    QSettings settings(storage.filePath("advanced.ini"), QSettings::IniFormat);
+    Preferences prefs;
+    prefs.options = {{"audio-codec", "aac"},
+                     {"video-buffer", 300},
+                     {"fullscreen", true},
+                     {"unknown", "bad"}};
+    prefs.save(settings);
+    auto restored = Preferences::load(settings);
+    auto args = mirrorArguments("PHONE123", restored);
+    QVERIFY(args.contains("--audio-codec=aac"));
+    QVERIFY(args.contains("--video-buffer=300"));
+    QVERIFY(args.contains("--fullscreen"));
+    QVERIFY(!args.join(' ').contains("unknown"));
+    restored.options["audio-codec"] = "invalid;value";
+    restored.options["video-buffer"] = -10;
+    args = mirrorArguments("PHONE123", restored);
+    QVERIFY(!args.join(' ').contains("invalid"));
+    QVERIFY(!args.contains("--video-buffer=-10"));
+    restored.options["no-control"] = true;
+    restored.options["show-touches"] = true;
+    restored.awake = restored.screenOff = true;
+    args = mirrorArguments("PHONE123", restored);
+    QVERIFY(args.contains("--no-control"));
+    QVERIFY(!args.contains("--show-touches"));
+    QVERIFY(!args.contains("--stay-awake"));
+    QVERIFY(!args.contains("--turn-screen-off"));
+    restored.audio = false;
+    QVERIFY(
+        !mirrorArguments("PHONE123", restored).contains("--audio-codec=aac"));
+  }
+  void phoneControlsTargetDeviceAndRespectReadOnly() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy logs(&engine, &Engine::log);
+    QSignalSpy messages(&engine, &Engine::message);
+    engine.phoneAction("LOCKED", Engine::PhoneAction::Home);
+    QVERIFY(!engine.deviceBusy());
+    engine.phoneAction("PHONE123", Engine::PhoneAction::Home);
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.deviceBusy(), 3000);
+    QVERIFY(!logs.isEmpty());
+    QVERIFY(logs.last().first().toString().contains(
+        "-s|PHONE123|shell|input|keyevent|KEYCODE_HOME"));
+    engine.preferences.options["no-control"] = true;
+    QVERIFY(engine.start("PHONE123"));
+    engine.preferences.options["no-control"] = false;
+    QVERIFY(!engine.controlAllowed());
+    engine.phoneAction("PHONE123", Engine::PhoneAction::Power);
+    QVERIFY(!engine.deviceBusy());
+    QVERIFY(messages.last().first().toString().contains("read-only"));
+    engine.installApk("PHONE123", "missing.apk");
+    QVERIFY(messages.last().first().toString().contains("read-only"));
+    engine.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 6000);
+    QVERIFY(engine.controlAllowed());
+  }
+  void settingsSearchFiltersGroups() {
+    Window window;
+    window.showPage(5);
+    auto *search = window.findChild<QLineEdit *>("settingsSearch");
+    QVERIFY(search);
+    search->setText("video-buffer");
+    QVERIFY(!window.findChild<QWidget *>("option-video-buffer")
+                 ->parentWidget()
+                 ->isHidden());
+    QVERIFY(window.findChild<QWidget *>("option-audio-codec")
+                ->parentWidget()
+                ->isHidden());
+    search->clear();
+    QVERIFY(!window.findChild<QWidget *>("option-audio-codec")
+                 ->parentWidget()
+                 ->isHidden());
+    int controls = 0;
+    for (auto *button : window.findChildren<QPushButton *>())
+      if (button->property("phoneControl").toBool())
+        ++controls;
+    QCOMPARE(controls, 6);
+  }
   void parse() {
     auto devices = parseDevices(
         "* daemon started successfully *\nList of devices attached\n"

@@ -337,6 +337,31 @@ QWidget *Window::sessionPage() {
   auto *choose = button("Choose a device", "phone");
   connect(choose, &QPushButton::clicked, this, [this] { showPage(0); });
   preview->addWidget(choose);
+  auto *phoneControls = new QGridLayout;
+  int actionIndex = 0;
+  for (const auto &entry :
+       {qMakePair(QString("Back"), Engine::PhoneAction::Back),
+        qMakePair(QString("Home"), Engine::PhoneAction::Home),
+        qMakePair(QString("Recent apps"), Engine::PhoneAction::Recents),
+        qMakePair(QString("Power"), Engine::PhoneAction::Power),
+        qMakePair(QString("Volume −"), Engine::PhoneAction::VolumeDown),
+        qMakePair(QString("Volume +"), Engine::PhoneAction::VolumeUp)}) {
+    auto *control = button(entry.first);
+    control->setProperty("phoneControl", true);
+    control->setAccessibleName("Phone: " + entry.first);
+    control->setToolTip(
+        "Send " + entry.first +
+        " to the active phone, or the selected device when idle.");
+    phoneControls->addWidget(control, actionIndex / 3, actionIndex % 3);
+    ++actionIndex;
+    connect(control, &QPushButton::clicked, this,
+            [this, action = entry.second] {
+              engine.phoneAction(engine.running() ? engine.activeSerial
+                                                  : selectedSerial(),
+                                 action);
+            });
+  }
+  preview->addLayout(phoneControls);
   preview->addStretch();
   columns->addWidget(previewCard, 3);
   auto *controls = new QVBoxLayout;
@@ -565,6 +590,11 @@ QWidget *Window::settingsPage() {
                       "Tune your next session. DroidCast manages its mirroring "
                       "engine and connection services for you.",
                       layout);
+  auto *search = new QLineEdit;
+  search->setObjectName("settingsSearch");
+  search->setAccessibleName("Search settings");
+  search->setPlaceholderText("Search settings, categories or scrcpy flags…");
+  layout->addWidget(search);
   auto *video = new QGroupBox("Display && video quality");
   auto *form = new QFormLayout(video);
   form->setSpacing(14);
@@ -638,6 +668,79 @@ QWidget *Window::settingsPage() {
                          "awake applies while the phone is charging.",
                          "muted"));
   layout->addWidget(behavior);
+  QList<QWidget *> searchable{video, behavior};
+  video->setProperty("searchTerms",
+                     "video resolution fps frame rate bitrate codec");
+  behavior->setProperty("searchTerms",
+                        "audio device behavior awake screen top");
+  for (const auto &category : {QString("Video"), QString("Audio"),
+                               QString("Device"), QString("Window")}) {
+    auto *group = new QGroupBox(category + " · advanced");
+    auto *fields = new QFormLayout(group);
+    fields->setSpacing(12);
+    QString terms = category;
+    for (const auto &option : sessionOptions()) {
+      if (option.category != category)
+        continue;
+      terms += " " + option.key + " " + option.title + " " + option.help;
+      const auto current = normalizedOption(
+          option, engine.preferences.options.value(option.key));
+      QWidget *control;
+      if (!option.choices.isEmpty()) {
+        auto *combo = new QComboBox;
+        combo->addItems(option.choices);
+        combo->setCurrentText(current.toString());
+        connect(combo, &QComboBox::currentTextChanged, this,
+                [this, key = option.key](const QString &value) {
+                  engine.preferences.options.insert(key, value);
+                  savePreferences();
+                });
+        control = combo;
+      } else if (option.initial.metaType().id() == QMetaType::Bool) {
+        auto *check = toggle(option.title, current.toBool());
+        connect(check, &QCheckBox::toggled, this,
+                [this, key = option.key](bool value) {
+                  engine.preferences.options.insert(key, value);
+                  savePreferences();
+                  updateActions();
+                });
+        control = check;
+      } else {
+        auto *spin = new QSpinBox;
+        spin->setRange(option.minimum, option.maximum);
+        spin->setValue(current.toInt());
+        connect(spin, &QSpinBox::valueChanged, this,
+                [this, key = option.key](int value) {
+                  engine.preferences.options.insert(key, value);
+                  savePreferences();
+                });
+        control = spin;
+      }
+      control->setObjectName("option-" + option.key);
+      control->setToolTip(option.help + "\n--" + option.key);
+      field(fields, option.title, control);
+      fields->addRow(label(option.help, "muted"));
+    }
+    group->setProperty("searchTerms", terms);
+    searchable.append(group);
+    layout->addWidget(group);
+  }
+  auto *noResults = label("No matching settings in this release.", "muted");
+  noResults->hide();
+  layout->addWidget(noResults);
+  connect(search, &QLineEdit::textChanged, this,
+          [searchable, noResults](const QString &text) {
+            bool found = false;
+            for (auto *group : searchable) {
+              const bool matches =
+                  group->property("searchTerms")
+                      .toString()
+                      .contains(text.trimmed(), Qt::CaseInsensitive);
+              group->setVisible(matches);
+              found |= matches;
+            }
+            noResults->setVisible(!found);
+          });
   QVBoxLayout *storage;
   auto *storageCard = card(storage);
   storage->addWidget(label("Capture storage", "section"));
@@ -778,7 +881,12 @@ void Window::updateActions() {
       activeReady = true;
   screenshotButton->setEnabled((running ? activeReady : ready) &&
                                !engine.deviceBusy());
-  apkButton->setEnabled(screenshotButton->isEnabled());
+  apkButton->setEnabled(screenshotButton->isEnabled() &&
+                        engine.controlAllowed());
+  for (auto *control : findChildren<QPushButton *>())
+    if (control->property("phoneControl").toBool())
+      control->setEnabled(screenshotButton->isEnabled() &&
+                          engine.controlAllowed());
   if (state == "unauthorized")
     deviceHelp->setText("Unlock your phone and accept the USB debugging "
                         "prompt. Devices refresh automatically.");

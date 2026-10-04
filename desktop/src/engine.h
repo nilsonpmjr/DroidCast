@@ -4,6 +4,16 @@
 #include <QProcess>
 #include <QSettings>
 #include <QTimer>
+#include <QVariantMap>
+
+struct SessionOption {
+  QString key, category, title, help;
+  QVariant initial;
+  QStringList choices;
+  int minimum = 0, maximum = 0;
+};
+const QList<SessionOption> &sessionOptions();
+QVariant normalizedOption(const SessionOption &option, const QVariant &value);
 
 struct Device {
   QString serial, state, model, connection;
@@ -15,6 +25,7 @@ struct Preferences {
   int size = 1080, fps = 60, bitrate = 8;
   QString keyboard = "sdk", codec = "h264", mouse = "sdk", mediaDirectory;
   bool audio = true, awake = false, screenOff = false, top = false;
+  QVariantMap options;
   static Preferences load(QSettings &settings);
   void save(QSettings &settings) const;
 };
@@ -38,6 +49,9 @@ public:
   bool deviceBusy() const { return deviceTask.state() != QProcess::NotRunning; }
   void capture(const QString &serial, const QString &path);
   void installApk(const QString &serial, const QString &path);
+  enum class PhoneAction { Back, Home, Recents, Power, VolumeUp, VolumeDown };
+  void phoneAction(const QString &serial, PhoneAction action);
+  bool controlAllowed() const;
   bool scanning() const { return scan.state() != QProcess::NotRunning; }
   bool running() const { return mirror.state() != QProcess::NotRunning; }
   bool wirelessBusy() const { return wireless.state() != QProcess::NotRunning; }
@@ -60,6 +74,7 @@ private:
   QTimer scanTimeout, wirelessTimeout, stopTimeout, deviceTimeout;
   QByteArray deviceOutput;
   QString capturePath;
+  bool commandTask = false, activeReadOnly = false;
   bool deviceTimedOut = false;
   bool canUseDevice(const QString &serial);
   bool stopping = false, scanTimedOut = false, wirelessTimedOut = false;

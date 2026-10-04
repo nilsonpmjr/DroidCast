@@ -9,6 +9,112 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 
+const QList<SessionOption> &sessionOptions() {
+  static const QList<SessionOption> options{
+      {"video-buffer",
+       "Video",
+       "Video buffer (ms)",
+       "More buffering can smooth playback at the cost of latency.",
+       0,
+       {},
+       0,
+       2000},
+      {"display-orientation",
+       "Video",
+       "Display orientation",
+       "Rotate the computer display, not the Android device.",
+       "0",
+       {"0", "90", "180", "270", "flip0", "flip90", "flip180", "flip270"}},
+      {"audio-codec",
+       "Audio",
+       "Audio codec",
+       "Requires a compatible encoder on the phone.",
+       "opus",
+       {"opus", "aac", "flac", "raw"}},
+      {"audio-source",
+       "Audio",
+       "Audio source",
+       "Output requires Android 11+. Playback requires Android 13+; apps may "
+       "opt out. Microphone captures the phone microphone.",
+       "output",
+       {"output", "playback", "mic"}},
+      {"audio-buffer",
+       "Audio",
+       "Audio buffer (ms)",
+       "Leave at zero to use the engine default for the selected codec.",
+       0,
+       {},
+       0,
+       2000},
+      {"audio-output-buffer",
+       "Audio",
+       "Output buffer (ms)",
+       "Computer audio output buffering. Smaller values may cause glitches.",
+       10,
+       {},
+       1,
+       1000},
+      {"no-control",
+       "Device",
+       "Read-only session",
+       "Disable Android input and APK installation. Screenshots remain "
+       "available.",
+       false,
+       {}},
+      {"show-touches",
+       "Device",
+       "Show physical touches",
+       "Shows touches made on the phone, not clicks injected from the "
+       "computer.",
+       false,
+       {}},
+      {"power-off-on-close",
+       "Device",
+       "Turn screen off on close",
+       "Turns the display off when the session ends; does not shut down "
+       "Android.",
+       false,
+       {}},
+      {"no-clipboard-autosync",
+       "Device",
+       "Disable clipboard synchronization",
+       "Prevent automatic clipboard sharing with the phone.",
+       false,
+       {}},
+      {"fullscreen",
+       "Window",
+       "Start fullscreen",
+       "Open the next mirror window fullscreen.",
+       false,
+       {}},
+      {"window-borderless",
+       "Window",
+       "Borderless mirror",
+       "Remove the mirror window decorations.",
+       false,
+       {}},
+      {"disable-screensaver",
+       "Window",
+       "Keep computer awake",
+       "Disable the computer screensaver while mirroring.",
+       false,
+       {}}};
+  return options;
+}
+
+QVariant normalizedOption(const SessionOption &option, const QVariant &value) {
+  if (!value.isValid())
+    return option.initial;
+  if (!option.choices.isEmpty())
+    return option.choices.contains(value.toString()) ? value : option.initial;
+  if (option.initial.metaType().id() == QMetaType::Bool)
+    return value.toBool();
+  bool ok = false;
+  int number = value.toInt(&ok);
+  return ok ? QVariant(qBound(option.minimum, number, option.maximum))
+            : option.initial;
+}
+
 Preferences Preferences::load(QSettings &s) {
   Preferences p = bundledPreferences();
   p.size = qBound(0, s.value("session/size", p.size).toInt(), 8192);
@@ -28,6 +134,9 @@ Preferences Preferences::load(QSettings &s) {
   p.awake = s.value("session/awake", p.awake).toBool();
   p.screenOff = s.value("session/screenOff", p.screenOff).toBool();
   p.top = s.value("session/top", p.top).toBool();
+  for (const auto &option : sessionOptions())
+    p.options.insert(
+        option.key, normalizedOption(option, s.value("options/" + option.key)));
   return p;
 }
 
@@ -43,6 +152,9 @@ void Preferences::save(QSettings &s) const {
   s.setValue("session/awake", awake);
   s.setValue("session/screenOff", screenOff);
   s.setValue("session/top", top);
+  for (const auto &option : sessionOptions())
+    s.setValue("options/" + option.key,
+               normalizedOption(option, options.value(option.key)));
 }
 
 QList<Device> parseDevices(const QString &output) {
@@ -93,6 +205,26 @@ QStringList mirrorArguments(const QString &serial, const Preferences &p,
     args << "--always-on-top";
   if (!recording.isEmpty())
     args << "--record=" + recording;
+  const bool readOnly = p.options.value("no-control", false).toBool();
+  if (readOnly) {
+    args.removeAll("--stay-awake");
+    args.removeAll("--turn-screen-off");
+  }
+  for (const auto &option : sessionOptions()) {
+    const auto value = normalizedOption(option, p.options.value(option.key));
+    if (value == option.initial)
+      continue;
+    if (!p.audio && option.category == "Audio")
+      continue;
+    if (readOnly &&
+        (option.key == "show-touches" || option.key == "power-off-on-close"))
+      continue;
+    if (option.initial.metaType().id() == QMetaType::Bool) {
+      if (value.toBool())
+        args << "--" + option.key;
+    } else
+      args << "--" + option.key + "=" + value.toString();
+  }
   return args;
 }
 
@@ -300,7 +432,10 @@ Engine::Engine(QObject *parent) : QObject(parent) {
                   "Device operation failed. See Diagnostics for details.");
               return;
             }
-            if (capturePath.isEmpty()) {
+            if (commandTask) {
+              emit log(QString::fromUtf8(deviceOutput).trimmed());
+              emit message("Phone command completed.");
+            } else if (capturePath.isEmpty()) {
               const auto result = QString::fromUtf8(deviceOutput).trimmed();
               emit log(result);
               emit message(result.contains("Success")
@@ -384,6 +519,7 @@ bool Engine::start(const QString &serial, const QString &recording) {
   mirror.setProcessEnvironment(env);
   activeSerial = serial;
   activeRecording = recording;
+  activeReadOnly = preferences.options.value("no-control", false).toBool();
   stopping = false;
   const auto args = mirrorArguments(serial, preferences, recording);
   emit log("Starting " + preferences.scrcpy +
@@ -435,6 +571,7 @@ void Engine::capture(const QString &serial, const QString &path) {
   if (!canUseDevice(serial) || path.isEmpty())
     return;
   capturePath = path;
+  commandTask = false;
   deviceOutput.clear();
   deviceTimedOut = false;
   deviceTimeout.start(20000);
@@ -444,6 +581,10 @@ void Engine::capture(const QString &serial, const QString &path) {
 }
 
 void Engine::installApk(const QString &serial, const QString &path) {
+  if (!controlAllowed()) {
+    emit message("APK installation is disabled in read-only mode.");
+    return;
+  }
   if (!canUseDevice(serial))
     return;
   if (!QFileInfo(path).isFile() ||
@@ -452,9 +593,58 @@ void Engine::installApk(const QString &serial, const QString &path) {
     return;
   }
   capturePath.clear();
+  commandTask = false;
   deviceOutput.clear();
   deviceTimedOut = false;
   deviceTimeout.start(120000);
   emit message("Installing application on your phone…");
   deviceTask.start(preferences.adb, {"-s", serial, "install", path});
+}
+
+bool Engine::controlAllowed() const {
+  return !(running() ? activeReadOnly
+                     : preferences.options.value("no-control", false).toBool());
+}
+
+void Engine::phoneAction(const QString &serial, PhoneAction action) {
+  if (!controlAllowed()) {
+    emit message("Phone controls are disabled in read-only mode.");
+    return;
+  }
+  if (running() && serial != activeSerial) {
+    emit message("Phone controls must target the active session.");
+    return;
+  }
+  if (!canUseDevice(serial))
+    return;
+  QString key;
+  switch (action) {
+  case PhoneAction::Back:
+    key = "KEYCODE_BACK";
+    break;
+  case PhoneAction::Home:
+    key = "KEYCODE_HOME";
+    break;
+  case PhoneAction::Recents:
+    key = "KEYCODE_APP_SWITCH";
+    break;
+  case PhoneAction::Power:
+    key = "KEYCODE_POWER";
+    break;
+  case PhoneAction::VolumeUp:
+    key = "KEYCODE_VOLUME_UP";
+    break;
+  case PhoneAction::VolumeDown:
+    key = "KEYCODE_VOLUME_DOWN";
+    break;
+  default:
+    return;
+  }
+  commandTask = true;
+  capturePath.clear();
+  deviceOutput.clear();
+  deviceTimedOut = false;
+  deviceTimeout.start(10000);
+  deviceTask.start(preferences.adb,
+                   {"-s", serial, "shell", "input", "keyevent", key});
 }
