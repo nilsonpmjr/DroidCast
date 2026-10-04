@@ -290,3 +290,18 @@ device compatibility testing remain open.
   copied into diagnostics. Tests cover malformed/wrapped rows, search configuration,
   selection write-through, read-only dependencies, manual fallback, target isolation
   and the 920×680 layout. Real Android 10+ launch remains release-proof work.
+
+## Part 15: explicit private clipboard actions
+
+- Added separate Copy from Android and Paste to Android buttons to the active-session
+  workspace. They are capability-gated, serialized with other bridge requests and
+  unavailable in read-only/camera sessions or without keyboard control.
+- Reused scrcpy's controller, device-message receiver and SDL host clipboard. The
+  private bridge carries only action bytes and status events, never clipboard text.
+- Copy completes only after Android returns text and the host clipboard accepts it;
+  paste reports that scrcpy queued the existing clipboard/paste control message.
+- Redacted injected text and clipboard content from verbose control-message logging;
+  logs now retain only operation metadata and byte length.
+- Tests cover both bytes, capability/readiness, read-only and camera modes, unavailable
+  response, timeout isolation, older engines, accessible UI controls and layout.
+  Cross-platform clipboard interoperability remains in release-proof work.

@@ -222,7 +222,7 @@ sc_control_msg_log(const struct sc_control_msg *msg) {
                      (long) msg->inject_keycode.metastate);
             break;
         case SC_CONTROL_MSG_TYPE_INJECT_TEXT:
-            LOG_CMSG("text \"%s\"", msg->inject_text.text);
+            LOG_CMSG("text length=%zu", strlen(msg->inject_text.text));
             break;
         case SC_CONTROL_MSG_TYPE_INJECT_TOUCH_EVENT: {
             int action = msg->inject_touch_event.action
@@ -273,10 +273,10 @@ sc_control_msg_log(const struct sc_control_msg *msg) {
                      copy_key_labels[msg->get_clipboard.copy_key]);
             break;
         case SC_CONTROL_MSG_TYPE_SET_CLIPBOARD:
-            LOG_CMSG("clipboard %" PRIu64_ " %s \"%s\"",
+            LOG_CMSG("clipboard %" PRIu64_ " %s length=%zu",
                      msg->set_clipboard.sequence,
                      msg->set_clipboard.paste ? "paste" : "nopaste",
-                     msg->set_clipboard.text);
+                     strlen(msg->set_clipboard.text));
             break;
         case SC_CONTROL_MSG_TYPE_SET_DISPLAY_POWER:
             LOG_CMSG("display power %s",

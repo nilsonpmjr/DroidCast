@@ -348,6 +348,79 @@ private slots:
     engine.stop();
     QTRY_VERIFY(!engine.running());
   }
+  void clipboardCommandsRequireCapabilityAndControl() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy feedback(&engine, &Engine::clipboardControlMessage);
+    QVERIFY(!engine.clipboardControlsAvailable());
+    engine.clipboardAction(Engine::ClipboardAction::CopyFromAndroid);
+    QVERIFY(feedback.last().first().toString().contains("waiting"));
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY_WITH_TIMEOUT(engine.clipboardControlsAvailable(), 3000);
+    engine.clipboardAction(Engine::ClipboardAction::CopyFromAndroid);
+    QVERIFY(!engine.clipboardControlsAvailable());
+    QTRY_VERIFY(engine.clipboardControlsAvailable());
+    QVERIFY(feedback.last().first().toString().contains("copied"));
+    engine.clipboardAction(Engine::ClipboardAction::PasteToAndroid);
+    QTRY_VERIFY(engine.clipboardControlsAvailable());
+    QVERIFY(feedback.last().first().toString().contains("paste request"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    engine.preferences.options["no-control"] = true;
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    QVERIFY(!engine.clipboardControlsAvailable());
+    engine.clipboardAction(Engine::ClipboardAction::PasteToAndroid);
+    QVERIFY(feedback.last().first().toString().contains("read-only"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    engine.preferences.options["no-control"] = false;
+    engine.preferences.options["video-source"] = "camera";
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    QVERIFY(!engine.clipboardControlsAvailable());
+    engine.clipboardAction(Engine::ClipboardAction::CopyFromAndroid);
+    QVERIFY(feedback.last().first().toString().contains("camera capture"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+  }
+  void clipboardCommandsHandleUnavailableTimeoutAndOldEngine() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy feedback(&engine, &Engine::clipboardControlMessage);
+
+    qputenv("HUB_TEST_MODE", "clipboard-unavailable");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.clipboardControlsAvailable());
+    engine.clipboardAction(Engine::ClipboardAction::PasteToAndroid);
+    QTRY_VERIFY(engine.clipboardControlsAvailable());
+    QVERIFY(feedback.last().first().toString().contains("unavailable"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    qputenv("HUB_TEST_MODE", "clipboard-timeout");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.clipboardControlsAvailable());
+    engine.clipboardAction(Engine::ClipboardAction::CopyFromAndroid);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        feedback.last().first().toString().contains("No clipboard"), 4000);
+    QVERIFY(!engine.clipboardControlsAvailable());
+    QVERIFY(engine.windowControlsAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    qputenv("HUB_TEST_MODE", "old-clipboard-bridge");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    QVERIFY(engine.androidControlsAvailable());
+    QVERIFY(!engine.clipboardControlsAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+  }
   void cameraSessionPanelIsContextualAndActionable() {
     QSettings settings;
     auto prefs = bundledPreferences();
@@ -407,7 +480,9 @@ private slots:
     window.showPage(1);
     auto *panel = window.findChild<QWidget *>("androidControlsPanel");
     auto *feedback = window.findChild<QLabel *>("androidControlFeedback");
-    QVERIFY(panel && feedback);
+    auto *clipboardFeedback =
+        window.findChild<QLabel *>("clipboardControlFeedback");
+    QVERIFY(panel && feedback && clipboardFeedback);
     QList<QPushButton *> controls;
     QPushButton *rotate = nullptr;
     for (auto *button : window.findChildren<QPushButton *>()) {
@@ -420,6 +495,19 @@ private slots:
         rotate = button;
     }
     QCOMPARE(controls.size(), 7);
+    QList<QPushButton *> clipboardControls;
+    QPushButton *copy = nullptr;
+    for (auto *button : window.findChildren<QPushButton *>()) {
+      if (!button->property("clipboardControl").toBool())
+        continue;
+      clipboardControls.append(button);
+      QVERIFY(!button->isEnabled());
+      QVERIFY(button->accessibleName().startsWith("Clipboard:"));
+      if (button->text() == "Copy from Android")
+        copy = button;
+    }
+    QCOMPARE(clipboardControls.size(), 2);
+    QVERIFY(copy);
     QVERIFY(rotate);
     QVERIFY(panel->isHidden());
     auto *start = window.findChild<QPushButton *>("startMirror");
@@ -427,6 +515,9 @@ private slots:
     start->click();
     QTRY_VERIFY(!panel->isHidden());
     QTRY_VERIFY(rotate->isEnabled());
+    QTRY_VERIFY(copy->isEnabled());
+    copy->click();
+    QTRY_VERIFY(clipboardFeedback->text().contains("copied"));
     rotate->click();
     QTRY_VERIFY(feedback->text().contains("rotation request queued"));
     auto *scroll = qobject_cast<QScrollArea *>(

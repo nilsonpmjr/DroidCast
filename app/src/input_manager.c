@@ -236,26 +236,26 @@ switch_fps_counter_state(struct sc_input_manager *im) {
     }
 }
 
-static void
+static bool
 clipboard_paste(struct sc_input_manager *im) {
     assert(im->controller && im->kp && !im->camera);
 
     char *text = SDL_GetClipboardText();
     if (!text) {
         LOGW("Could not get clipboard text: %s", SDL_GetError());
-        return;
+        return false;
     }
     if (!*text) {
         // empty text
         SDL_free(text);
-        return;
+        return false;
     }
 
     char *text_dup = strdup(text);
     SDL_free(text);
     if (!text_dup) {
         LOGW("Could not strdup input text");
-        return;
+        return false;
     }
 
     struct sc_control_msg msg;
@@ -264,7 +264,9 @@ clipboard_paste(struct sc_input_manager *im) {
     if (!sc_controller_push_msg(im->controller, &msg)) {
         free(text_dup);
         LOGW("Could not request 'paste clipboard'");
+        return false;
     }
+    return true;
 }
 
 static void
@@ -355,6 +357,36 @@ sc_input_manager_desktop_android_action(
         return false;
     }
     return true;
+}
+
+bool
+sc_input_manager_desktop_clipboard_copy(struct sc_input_manager *im) {
+    if (!im->controller || !im->kp || im->camera) {
+        return false;
+    }
+    return get_device_clipboard(im, SC_COPY_KEY_COPY);
+}
+
+bool
+sc_input_manager_desktop_clipboard_paste(struct sc_input_manager *im) {
+    if (!im->controller || !im->kp || im->camera) {
+        return false;
+    }
+    char *text = SDL_GetClipboardText();
+    if (!text) {
+        return false;
+    }
+    size_t len = strlen(text);
+    SDL_free(text);
+    size_t max_len = im->legacy_paste
+                   ? SC_CONTROL_MSG_INJECT_TEXT_MAX_LENGTH
+                   : SC_CONTROL_MSG_CLIPBOARD_TEXT_MAX_LENGTH;
+    if (!len || len > max_len) {
+        return false;
+    }
+    return im->legacy_paste
+         ? clipboard_paste(im)
+         : set_device_clipboard(im, true, SC_SEQUENCE_INVALID);
 }
 
 bool

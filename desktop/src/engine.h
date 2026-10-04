@@ -119,6 +119,9 @@ public:
   };
   void androidAction(AndroidAction action);
   bool androidControlsAvailable() const;
+  enum class ClipboardAction { CopyFromAndroid, PasteToAndroid };
+  void clipboardAction(ClipboardAction action);
+  bool clipboardControlsAvailable() const;
   enum class SessionState {
     Idle,
     Starting,
@@ -154,6 +157,8 @@ signals:
   void cameraControlMessage(const QString &text);
   void androidControlsChanged();
   void androidControlMessage(const QString &text);
+  void clipboardControlsChanged();
+  void clipboardControlMessage(const QString &text);
   void captureSaved(const QString &path);
   void message(const QString &text);
   void log(const QString &text);
@@ -182,6 +187,7 @@ private:
   bool windowCommandsReady = false, windowCommandsHealthy = true;
   bool cameraCommandsReady = false, cameraCommandsHealthy = true;
   bool androidCommandsReady = false, androidCommandsHealthy = true;
+  bool clipboardCommandsReady = false, clipboardCommandsHealthy = true;
   char pendingBridgeCommand = 0;
   void readMirrorOutput();
   QByteArray scanOutput, wirelessOutput, pairingInput;

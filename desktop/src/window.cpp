@@ -414,11 +414,44 @@ QWidget *Window::sessionPage() {
           &QLabel::setText);
   connect(&engine, &Engine::androidControlsChanged, this,
           &Window::updateActions);
-  connect(&engine, &Engine::sessionChanged, this, [this, androidFeedback] {
-    if (!engine.running())
-      androidFeedback->setText(
-          "Start a display session to use Android actions.");
-  });
+  androidLayout->addWidget(label("Clipboard", "section"));
+  androidLayout->addWidget(label(
+      "Copy the current Android selection to this computer, or paste the "
+      "computer clipboard into the focused Android app. Contents are never "
+      "shown in DroidCast diagnostics.",
+      "muted"));
+  auto *clipboardControls = new QHBoxLayout;
+  for (const auto &entry :
+       {qMakePair(QString("Copy from Android"),
+                  Engine::ClipboardAction::CopyFromAndroid),
+        qMakePair(QString("Paste to Android"),
+                  Engine::ClipboardAction::PasteToAndroid)}) {
+    auto *control = button(entry.first);
+    control->setProperty("clipboardControl", true);
+    control->setAccessibleName("Clipboard: " + entry.first);
+    control->setMinimumHeight(40);
+    clipboardControls->addWidget(control);
+    connect(control, &QPushButton::clicked, this,
+            [this, action = entry.second] { engine.clipboardAction(action); });
+  }
+  androidLayout->addLayout(clipboardControls);
+  auto *clipboardFeedback =
+      label("Start a display session to use clipboard actions.", "muted");
+  clipboardFeedback->setObjectName("clipboardControlFeedback");
+  androidLayout->addWidget(clipboardFeedback);
+  connect(&engine, &Engine::clipboardControlMessage, clipboardFeedback,
+          &QLabel::setText);
+  connect(&engine, &Engine::clipboardControlsChanged, this,
+          &Window::updateActions);
+  connect(&engine, &Engine::sessionChanged, this,
+          [this, androidFeedback, clipboardFeedback] {
+            if (!engine.running()) {
+              androidFeedback->setText(
+                  "Start a display session to use Android actions.");
+              clipboardFeedback->setText(
+                  "Start a display session to use clipboard actions.");
+            }
+          });
   auto *cameraPanel = new QWidget;
   cameraPanel->setObjectName("cameraControlsPanel");
   auto *cameraLayout = new QVBoxLayout(cameraPanel);
@@ -1542,6 +1575,8 @@ void Window::updateActions() {
       control->setEnabled(engine.cameraControlsAvailable());
     else if (control->property("androidControl").toBool())
       control->setEnabled(engine.androidControlsAvailable());
+    else if (control->property("clipboardControl").toBool())
+      control->setEnabled(engine.clipboardControlsAvailable());
     else if (control->property("windowControl").toBool())
       control->setEnabled(engine.windowControlsAvailable());
     else if (control->property("inspectDevice").toBool())

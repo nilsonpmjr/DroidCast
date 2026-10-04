@@ -955,6 +955,9 @@ sc_screen_apply_frame(struct sc_screen *screen, bool can_resize) {
     sc_desktop_bridge_first_frame();
     if (screen->controller && !screen->camera) {
         sc_desktop_bridge_android_controls_ready();
+        if (screen->im.kp) {
+            sc_desktop_bridge_clipboard_controls_ready();
+        }
     } else if (screen->controller && screen->camera) {
         sc_desktop_bridge_camera_controls_ready();
     }
@@ -1143,6 +1146,25 @@ sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
     switch (event->type) {
         case SC_EVENT_DESKTOP_WINDOW_COMMAND: {
             char command = (char) event->user.code;
+            bool clipboard_command = command == 'Y' || command == 'y';
+            if (clipboard_command) {
+                bool available = screen->controller && screen->im.kp
+                              && !screen->camera && !screen->disconnected
+                              && !screen->paused;
+                bool handled = available
+                    && (command == 'Y'
+                        ? sc_input_manager_desktop_clipboard_copy(&screen->im)
+                        : sc_input_manager_desktop_clipboard_paste(&screen->im));
+                if (command == 'Y' && handled) {
+                    sc_desktop_bridge_clipboard_copy_pending();
+                } else {
+                    char result[64];
+                    snprintf(result, sizeof(result), "clipboard-result:%c:%s",
+                             command, handled ? "handled" : "unavailable");
+                    sc_desktop_bridge_report(result);
+                }
+                return;
+            }
             bool android_command = command == '0' || command == '1'
                                 || command == 'N' || command == 'S'
                                 || command == 'C' || command == 'D'

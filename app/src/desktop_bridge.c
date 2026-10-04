@@ -20,6 +20,8 @@ static SDL_TimerID input_timer;
 static bool frame_reported;
 static bool camera_controls_reported;
 static bool android_controls_reported;
+static bool clipboard_controls_reported;
+static bool clipboard_copy_pending;
 
 // Only this timer reads stdin. Bounded non-blocking reads also make shutdown
 // safe when the desktop disappears without sending the quit byte.
@@ -57,7 +59,7 @@ read_commands(void *userdata, SDL_TimerID timer_id, Uint32 interval) {
         return 0;
     }
     for (int i = 0; i < count; ++i) {
-        if (bytes[i] && strchr("FWZLRPUTt+-01NSCDV", bytes[i])) {
+        if (bytes[i] && strchr("FWZLRPUTt+-01NSCDVYy", bytes[i])) {
             SDL_Event event = {
                 .user = {.type = SC_EVENT_DESKTOP_WINDOW_COMMAND,
                          .code = bytes[i]},
@@ -87,8 +89,32 @@ sc_desktop_bridge_start(void) {
     frame_reported = false;
     camera_controls_reported = false;
     android_controls_reported = false;
+    clipboard_controls_reported = false;
+    clipboard_copy_pending = false;
     input_timer = SDL_AddTimer(50, read_commands, NULL);
     sc_desktop_bridge_report(input_timer ? "bridge-ready" : "bridge-error");
+}
+
+void
+sc_desktop_bridge_clipboard_controls_ready(void) {
+    if (!clipboard_controls_reported) {
+        clipboard_controls_reported = true;
+        sc_desktop_bridge_report("clipboard-controls-ready");
+    }
+}
+
+void
+sc_desktop_bridge_clipboard_copy_pending(void) {
+    clipboard_copy_pending = true;
+}
+
+void
+sc_desktop_bridge_clipboard_copy_complete(bool success) {
+    if (clipboard_copy_pending) {
+        clipboard_copy_pending = false;
+        sc_desktop_bridge_report(success ? "clipboard-result:Y:handled"
+                                         : "clipboard-result:Y:unavailable");
+    }
 }
 
 void
@@ -123,4 +149,5 @@ sc_desktop_bridge_stop(void) {
         SDL_RemoveTimer(input_timer);
         input_timer = 0;
     }
+    clipboard_copy_pending = false;
 }

@@ -17,6 +17,8 @@ their normal stdin behavior. The desktop generates a new token per launch.
   `window-result:<byte>:handled` / `window-result:<byte>:unavailable`.
 - Android events: `android-controls-ready` and
   `android-result:<byte>:handled` / `android-result:<byte>:unavailable`.
+- Clipboard events: `clipboard-controls-ready` and
+  `clipboard-result:<byte>:handled` / `clipboard-result:<byte>:unavailable`.
 - Camera events: `camera-controls-ready` and
   `camera-result:<byte>:handled` / `camera-result:<byte>:unavailable`.
 - `first-frame` is emitted once, after uploading and rendering a video frame.
@@ -43,6 +45,11 @@ their normal stdin behavior. The desktop generates a new token per launch.
 | `D` | Rotate the Android device |
 | `V` | Request a fresh video key frame |
 
+| Byte | Clipboard action |
+| --- | --- |
+| `Y` | Copy the current Android selection to the computer clipboard |
+| `y` | Paste the computer clipboard into the focused Android app |
+
 | Byte | Live camera action |
 | --- | --- |
 | `T` / `t` | Request torch on / off |
@@ -61,6 +68,14 @@ queued the control message; Android may still reject it. They are unavailable
 while the displayed image is paused. `Rotate Android` changes the phone-side
 orientation, while `L` / `R` rotate only the image presented by the computer.
 
+Clipboard commands are advertised only for non-camera sessions with both the
+Android control channel and a key processor. They use scrcpy's existing device
+message and SDL clipboard paths: clipboard text never appears in a `DROIDCAST/1`
+line. Verbose control-message logs report text length, never content. Copy is
+acknowledged only after Android returns clipboard text and SDL accepts it; paste
+is acknowledged when its control message is queued. Empty/unsupported operations
+return unavailable. Read-only sessions do not advertise the capability.
+
 Ordinary window commands do not mutate Android and are allowed in read-only mode.
 With `--flex-display`, resizing propagates to the Android virtual display;
 DroidCast disables that mode when read-only is selected. Pause
@@ -70,7 +85,7 @@ the window manager honored the requested geometry/fullscreen state. The desktop
 does not maintain optimistic fullscreen or paused toggle state, so keyboard
 shortcuts in the mirror cannot leave a stale toggle in the desktop UI.
 
-Only one bridge command can be outstanding across all three families. After two
+Only one bridge command can be outstanding across all four families. After two
 seconds without a matching response, the desktop disables that command family
 until a new session starts. It never retries toggles automatically, and late
 replies cannot complete a later command in the same session. A camera or Android

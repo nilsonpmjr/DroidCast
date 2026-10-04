@@ -897,6 +897,8 @@ Engine::Engine(QObject *parent) : QObject(parent) {
         QByteArray("Tt+-").contains(pendingBridgeCommand);
     const bool androidCommand =
         QByteArray("01NSCDV").contains(pendingBridgeCommand);
+    const bool clipboardCommand =
+        QByteArray("Yy").contains(pendingBridgeCommand);
     pendingBridgeCommand = 0;
     if (cameraCommand) {
       cameraCommandsHealthy = false;
@@ -908,6 +910,11 @@ Engine::Engine(QObject *parent) : QObject(parent) {
       emit androidControlMessage(
           "No confirmation from Android. Restart the session to re-enable "
           "device actions; no command was retried.");
+    } else if (clipboardCommand) {
+      clipboardCommandsHealthy = false;
+      emit clipboardControlMessage(
+          "No clipboard confirmation arrived. Restart the session to "
+          "re-enable clipboard actions; no request was retried.");
     } else {
       windowCommandsHealthy = false;
       emit windowControlMessage(
@@ -917,6 +924,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
     emit windowControlsChanged();
     emit cameraControlsChanged();
     emit androidControlsChanged();
+    emit clipboardControlsChanged();
   });
   scanTimeout.setSingleShot(true);
   wirelessTimeout.setSingleShot(true);
@@ -1264,6 +1272,8 @@ bool Engine::start(const QString &serial, const QString &recording) {
   cameraCommandsHealthy = true;
   androidCommandsReady = false;
   androidCommandsHealthy = true;
+  clipboardCommandsReady = false;
+  clipboardCommandsHealthy = true;
   pendingBridgeCommand = 0;
   emit windowControlMessage(
       "Window controls become available after the first video frame.");
@@ -1277,6 +1287,11 @@ bool Engine::start(const QString &serial, const QString &recording) {
       : activeReadOnly
           ? "Android device actions are disabled in read-only mode."
           : "Android device actions become available after the first frame.");
+  emit clipboardControlMessage(
+      activeCamera ? "Clipboard actions are unavailable during camera capture."
+      : activeReadOnly
+          ? "Clipboard actions are disabled in read-only mode."
+          : "Clipboard actions become available after the first frame.");
   forcedStop = bridgeReady = recordingFinalized = recordingFailed = false;
   mirrorOutput.clear();
   sessionToken = QUuid::createUuid().toString(QUuid::Id128).toLatin1();
@@ -1370,6 +1385,15 @@ void Engine::readMirrorOutput() {
               : "Camera controls ready. Requests are sent to the phone; "
                 "hardware support still varies.");
       emit cameraControlsChanged();
+    } else if (event == "clipboard-controls-ready" && bridgeReady &&
+               !activeCamera) {
+      clipboardCommandsReady = true;
+      emit clipboardControlMessage(
+          activeReadOnly
+              ? "Clipboard actions are disabled in read-only mode."
+              : "Clipboard actions ready. Clipboard contents stay out of "
+                "DroidCast diagnostics.");
+      emit clipboardControlsChanged();
     } else if (event.startsWith("window-result:") && bridgeReady &&
                pendingBridgeCommand) {
       const QByteArray expected =
@@ -1390,6 +1414,7 @@ void Engine::readMirrorOutput() {
         emit windowControlsChanged();
         emit cameraControlsChanged();
         emit androidControlsChanged();
+        emit clipboardControlsChanged();
       }
     } else if (event.startsWith("camera-result:") && bridgeReady &&
                pendingBridgeCommand) {
@@ -1411,6 +1436,7 @@ void Engine::readMirrorOutput() {
         emit cameraControlsChanged();
         emit windowControlsChanged();
         emit androidControlsChanged();
+        emit clipboardControlsChanged();
       }
     } else if (event.startsWith("android-result:") && bridgeReady &&
                pendingBridgeCommand) {
@@ -1454,6 +1480,28 @@ void Engine::readMirrorOutput() {
         emit androidControlsChanged();
         emit windowControlsChanged();
         emit cameraControlsChanged();
+        emit clipboardControlsChanged();
+      }
+    } else if (event.startsWith("clipboard-result:") && bridgeReady &&
+               pendingBridgeCommand) {
+      const QByteArray expected =
+          QByteArray("clipboard-result:") + pendingBridgeCommand + ':';
+      if (event == expected + "handled" || event == expected + "unavailable") {
+        bridgeCommandTimeout.stop();
+        const bool handled = event.endsWith(":handled");
+        const char command = pendingBridgeCommand;
+        pendingBridgeCommand = 0;
+        emit clipboardControlMessage(
+            !handled
+                ? "This clipboard action is unavailable. Check the focused "
+                  "Android app, clipboard content and session permissions."
+            : command == 'Y'
+                ? "Android selection copied to the computer clipboard."
+                : "Computer clipboard paste request queued on Android.");
+        emit clipboardControlsChanged();
+        emit windowControlsChanged();
+        emit cameraControlsChanged();
+        emit androidControlsChanged();
       }
     } else if (event == "recording-finalized" && bridgeReady)
       recordingFinalized = true;
@@ -1521,6 +1569,7 @@ void Engine::windowAction(WindowAction action) {
   emit windowControlsChanged();
   emit cameraControlsChanged();
   emit androidControlsChanged();
+  emit clipboardControlsChanged();
 }
 
 bool Engine::cameraControlsAvailable() const {
@@ -1568,6 +1617,7 @@ void Engine::cameraAction(CameraAction action) {
   emit cameraControlsChanged();
   emit windowControlsChanged();
   emit androidControlsChanged();
+  emit clipboardControlsChanged();
 }
 
 bool Engine::androidControlsAvailable() const {
@@ -1626,6 +1676,43 @@ void Engine::androidAction(AndroidAction action) {
   emit androidControlsChanged();
   emit windowControlsChanged();
   emit cameraControlsChanged();
+  emit clipboardControlsChanged();
+}
+
+bool Engine::clipboardControlsAvailable() const {
+  return running() && state == SessionState::Streaming && !activeCamera &&
+         !activeReadOnly && clipboardCommandsReady &&
+         clipboardCommandsHealthy && !pendingBridgeCommand;
+}
+
+void Engine::clipboardAction(ClipboardAction action) {
+  if (!clipboardControlsAvailable()) {
+    emit clipboardControlMessage(
+        cameraSession()
+            ? "Clipboard actions are unavailable during camera capture."
+        : activeReadOnly ? "Clipboard actions are disabled in read-only mode."
+                         : "Clipboard actions are waiting for the stream or "
+                           "another request.");
+    return;
+  }
+  const char command = action == ClipboardAction::CopyFromAndroid ? 'Y' : 'y';
+  pendingBridgeCommand = command;
+  if (mirror.write(&command, 1) != 1) {
+    pendingBridgeCommand = 0;
+    clipboardCommandsHealthy = false;
+    emit clipboardControlMessage(
+        "Could not send the clipboard request. Restart the session.");
+  } else {
+    bridgeCommandTimeout.start(2000);
+    emit clipboardControlMessage(
+        action == ClipboardAction::CopyFromAndroid
+            ? "Waiting for Android to return the selected text…"
+            : "Waiting for Android to accept the paste request…");
+  }
+  emit clipboardControlsChanged();
+  emit windowControlsChanged();
+  emit cameraControlsChanged();
+  emit androidControlsChanged();
 }
 
 void Engine::connectWireless(const QString &endpoint, const QString &code) {

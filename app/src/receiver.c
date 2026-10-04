@@ -6,6 +6,7 @@
 #include <SDL3/SDL_clipboard.h>
 
 #include "device_msg.h"
+#include "desktop_bridge.h"
 #include "events.h"
 #include "util/log.h"
 #include "util/str.h"
@@ -51,16 +52,19 @@ task_set_clipboard(void *userdata) {
     char *current = SDL_GetClipboardText();
     bool same = current && !strcmp(current, text);
     SDL_free(current);
+    bool success;
     if (same) {
         LOGD("Computer clipboard unchanged");
+        success = true;
     } else {
-        bool ok = SDL_SetClipboardText(text);
-        if (ok) {
+        success = SDL_SetClipboardText(text);
+        if (success) {
             LOGI("Device clipboard copied");
         } else {
             LOGE("Could not set clipboard: %s", SDL_GetError());
         }
     }
+    sc_desktop_bridge_clipboard_copy_complete(success);
 
     free(text);
 }

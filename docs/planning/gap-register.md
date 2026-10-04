@@ -23,7 +23,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Session lifecycle | Partial | First-frame state, graceful stop, recording finalization and disconnect/failure states. | Real unplug/reconnect and playable-recording tests on phones. |
 | Device workspace | Partial | USB discovery, wireless pair/connect, screenshots, APK install and selected-device targeting. | Complete pair-to-mirror guidance and broader recovery testing. |
 | Configuration routes | Partial | Searchable Video, Camera, Audio, Device, Window, Keyboard, Mouse, Gamepad, Recording and Virtual display categories. | Connection/Tunnels, Control, OTG, Video4Linux and complete Shortcuts routes. |
-| Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, Android/window rotation, reset video, mirror-window actions and contextual camera controls. | Clipboard, app/file actions and measured FPS. |
+| Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, Android/window rotation, reset video, mirror-window actions and contextual camera controls. | Live app/file actions and measured FPS. |
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
 | Audio | Partial | Enablement, source, codec and buffers. | Duplication, encoder/bitrate, require-audio, audio-only and playback policies. |
 | Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior and UHID gamepad. | Mouse bindings, shortcut modifier, AOA modes, gesture help and peripheral tests. |
@@ -36,26 +36,21 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
 
-## Next implementation: explicit clipboard actions
+## Next implementation: measured FPS in the workspace
 
-This completes the remaining routine interaction in ticket 15. Clipboard contents
-are private data, so the implementation must not treat them like ordinary command
-diagnostics.
+The clipboard slice is complete in code. The next bounded toolbar slice should turn
+scrcpy's existing FPS counter into useful workspace feedback instead of leaving its
+measurements only in process output.
 
-1. Define separate Copy from Android and Paste to Android actions; do not overload
-   clipboard autosync or imply continuous synchronization.
-2. Extend the private bridge with explicit capability and result events. Do not put
-   clipboard text in protocol status lines, diagnostics or test failure output.
-3. Use scrcpy's controller/device-message paths and enforce bounded payloads; avoid
-   shell commands and ADB clipboard workarounds.
-4. Disable both actions when no control channel exists, during camera sessions, after
-   disconnect and while another bridge request is pending.
-5. Show only outcome/status text in the workspace. Never display clipboard contents
-   unless the user pastes them into another application themselves.
-6. Test empty, Unicode and maximum-size content, wrong target, read-only, unavailable,
-   timeout, stale replies and clean stop without recording payloads in logs.
-7. Verify Android-version restrictions and host clipboard behavior on Linux, Windows
-   and macOS before claiming cross-platform support.
+1. Add explicit start/stop FPS commands to the bridge without parsing generic logs.
+2. Emit bounded structured samples containing rendered FPS and skipped-frame count.
+3. Show the latest sample and measurement state beside session status; do not confuse
+   rendered FPS with capture limit, display refresh rate or end-to-end latency.
+4. Keep measurement host-only and available in read-only sessions, but unavailable
+   without video playback or before the first frame.
+5. Stop reporting on session end and ignore stale samples from prior session tokens.
+6. Test start/stop, structured samples, zero/skipped frames, old engines, timeout,
+   read-only mode, camera sessions and layout at 920×680.
 
 ## Release-proof still required for recent work
 
@@ -67,6 +62,9 @@ diagnostics.
 - **Android actions:** verify screen power, notification/Quick Settings panels,
   panel collapse, device rotation and reset-video on multiple Android versions.
   Queue acknowledgement does not prove that Android honored the request.
+- **Clipboard:** verify copy and paste with empty, Unicode and maximum practical
+  content on Android/Linux, Windows and macOS. Automated tests prove command/privacy
+  behavior, not platform clipboard interoperability.
 - **Cross-platform bridge:** exercise stdin commands and shutdown on Windows; validate
   the app bundle and pipe behavior on macOS.
 - **Host branding:** confirm Desktop/Laptop selection on Windows hardware and both

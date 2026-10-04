@@ -96,4 +96,10 @@ bool
 sc_input_manager_desktop_android_action(
     struct sc_input_manager *im, enum sc_desktop_android_action action);
 
+bool
+sc_input_manager_desktop_clipboard_copy(struct sc_input_manager *im);
+
+bool
+sc_input_manager_desktop_clipboard_paste(struct sc_input_manager *im);
+
 #endif

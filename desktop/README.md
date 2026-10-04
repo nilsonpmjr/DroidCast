@@ -71,6 +71,9 @@ Windows/macOS build paths have not yet been exercised.
   Display sessions add explicit Android screen on/off, notification, Quick
   Settings, collapse-panels, device rotation and video-reset actions. They are
   capability-gated, serialized and disabled in read-only or camera sessions.
+  Explicit clipboard buttons copy the current Android selection or paste the
+  computer clipboard through scrcpy's control channel; clipboard contents are
+  never included in DroidCast bridge status or diagnostics.
   Camera sessions reveal contextual torch on/off and relative zoom controls.
   They use scrcpy's Android control channel, so they are unavailable in read-only
   mode and report requests rather than assuming the hardware accepted them.
