@@ -683,6 +683,41 @@ parseVideoEncoderCapabilities(const QString &output) {
   return result;
 }
 
+QList<AppCapability> parseAppCapabilities(const QString &output) {
+  QList<AppCapability> result;
+  bool inList = false, pendingSystem = false;
+  QString pendingName;
+  static const QRegularExpression complete(
+      "\\A\\s*([*-])\\s+(.+?)\\s{2,}([A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-"
+      "z0-9_]*)*)\\s*\\z");
+  static const QRegularExpression package(
+      "\\A[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*\\z");
+  for (const auto &raw : output.split('\n')) {
+    const auto line = raw.trimmed();
+    if (line.contains("List of apps:")) {
+      inList = true;
+      continue;
+    }
+    if (!inList)
+      continue;
+    if (line.startsWith("List of "))
+      break;
+    const auto match = complete.match(raw);
+    if (match.hasMatch()) {
+      result.append({match.captured(2).trimmed(), match.captured(3),
+                     match.captured(1) == "*"});
+      pendingName.clear();
+    } else if (!pendingName.isEmpty() && package.match(line).hasMatch()) {
+      result.append({pendingName, line, pendingSystem});
+      pendingName.clear();
+    } else if (line.startsWith("* ") || line.startsWith("- ")) {
+      pendingSystem = line.startsWith("* ");
+      pendingName = line.mid(2).trimmed();
+    }
+  }
+  return result;
+}
+
 QStringList mirrorArguments(const QString &serial, const Preferences &p,
                             const QString &recording) {
   const bool camera =
@@ -1144,7 +1179,8 @@ void Engine::inspectDevice(const QString &serial) {
   inspectionSerial = serial;
   inspectionOutput.clear();
   inspectionAborted = false;
-  emit inspectionResult(serial, "Inspecting displays, encoders and cameras…");
+  emit inspectionResult(serial,
+                        "Inspecting displays, encoders, cameras and apps…");
   auto env = QProcessEnvironment::systemEnvironment();
   env.remove("DROIDCAST_SESSION_TOKEN");
   env.insert("ADB", executablePath(preferences.adb));
@@ -1154,7 +1190,7 @@ void Engine::inspectDevice(const QString &serial) {
   inspectionTimeout.start(20000);
   inspector.start(preferences.scrcpy,
                   {"--serial=" + serial, "--list-displays", "--list-encoders",
-                   "--list-camera-sizes"});
+                   "--list-camera-sizes", "--list-apps"});
 }
 
 void Engine::cancelInspection() {

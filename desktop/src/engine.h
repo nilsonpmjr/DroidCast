@@ -38,6 +38,11 @@ struct VideoEncoderCapability {
 QList<DisplayCapability> parseDisplayCapabilities(const QString &output);
 QList<VideoEncoderCapability>
 parseVideoEncoderCapabilities(const QString &output);
+struct AppCapability {
+  QString name, package;
+  bool system;
+};
+QList<AppCapability> parseAppCapabilities(const QString &output);
 
 struct Preferences {
   QString adb = "adb", scrcpy = "scrcpy", server;

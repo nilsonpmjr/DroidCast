@@ -4,6 +4,7 @@
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QCompleter>
 #include <QDateTime>
 #include <QDesktopServices>
 #include <QDir>
@@ -858,6 +859,26 @@ QWidget *Window::settingsPage() {
     auto *fields = new QFormLayout(group);
     fields->setSpacing(12);
     QString terms = category;
+    if (category == "Virtual display") {
+      appSelector = new QComboBox;
+      appSelector->setObjectName("detectedApp");
+      appSelector->setAccessibleName("Installed Android application");
+      appSelector->setEditable(true);
+      appSelector->setInsertPolicy(QComboBox::NoInsert);
+      appSelector->completer()->setCaseSensitivity(Qt::CaseInsensitive);
+      appSelector->completer()->setFilterMode(Qt::MatchContains);
+      field(fields, "Installed application", appSelector);
+      fields->addRow(label(
+          "Inspect the phone, then search by application name or package. "
+          "The exact-package field remains available below.",
+          "muted"));
+      connect(appSelector, qOverload<int>(&QComboBox::activated), this,
+              [this](int index) {
+                const auto package = appSelector->itemData(index).toString();
+                if (!package.isEmpty())
+                  findChild<QLineEdit *>("option-start-app")->setText(package);
+              });
+    }
     if (category == "Video") {
       displaySelector = new QComboBox;
       displaySelector->setObjectName("detectedDisplay");
@@ -974,6 +995,9 @@ QWidget *Window::settingsPage() {
         if (option.key == "video-encoder")
           connect(edit, &QLineEdit::editingFinished, this,
                   &Window::updateDeviceCapabilitySelectors);
+        if (option.key == "start-app")
+          connect(edit, &QLineEdit::editingFinished, this,
+                  &Window::updateAppSelector);
         connect(edit, &QLineEdit::textChanged, this,
                 [this, key = option.key](const QString &value) {
                   engine.preferences.options.insert(key, value.trimmed());
@@ -989,6 +1013,8 @@ QWidget *Window::settingsPage() {
                   updateActions();
                   if (key == "virtual-display")
                     updateDeviceCapabilitySelectors();
+                  if (key == "virtual-display" || key == "no-control")
+                    updateAppSelector();
                 });
         if (option.key == "camera-high-speed")
           connect(check, &QCheckBox::toggled, this,
@@ -1024,18 +1050,23 @@ QWidget *Window::settingsPage() {
         fields->addRow(validation);
       fields->addRow(label(option.help, "muted"));
     }
-    if (category == "Video" || category == "Camera") {
+    if (category == "Video" || category == "Camera" ||
+        category == "Virtual display") {
       const bool cameraReport = category == "Camera";
-      terms += cameraReport
-                   ? " inspect camera sizes rates list-cameras "
-                     "list-camera-sizes"
-                   : " inspect resources displays encoders list-displays "
-                     "list-encoders";
+      const bool appReport = category == "Virtual display";
+      terms += cameraReport ? " inspect camera sizes rates list-cameras "
+                              "list-camera-sizes"
+               : appReport  ? " inspect installed apps packages list-apps"
+                            : " inspect resources displays encoders "
+                              "list-displays list-encoders";
       auto *inspect = button(cameraReport ? "Inspect phone cameras"
+                             : appReport  ? "Inspect installed apps"
                                           : "Inspect selected phone",
                              "phone");
       inspect->setProperty("inspectDevice", true);
-      inspect->setObjectName(cameraReport ? "inspectCamera" : "inspectDevice");
+      inspect->setObjectName(cameraReport ? "inspectCamera"
+                             : appReport  ? "inspectApps"
+                                          : "inspectDevice");
       auto *cancel = button("Cancel inspection");
       cancel->setProperty("cancelInspection", true);
       auto *actions = new QHBoxLayout;
@@ -1044,36 +1075,42 @@ QWidget *Window::settingsPage() {
       fields->addRow(actions);
       auto *report = new QPlainTextEdit;
       report->setObjectName(cameraReport ? "cameraCapabilities"
+                            : appReport  ? "appCapabilities"
                                          : "deviceCapabilities");
-      report->setAccessibleName(cameraReport
-                                    ? "Selected phone cameras report"
-                                    : "Selected phone displays and encoders "
-                                      "report");
+      report->setAccessibleName(
+          cameraReport ? "Selected phone cameras report"
+          : appReport  ? "Selected phone installed applications report"
+                       : "Selected phone displays and encoders report");
       report->setReadOnly(true);
       report->setMaximumBlockCount(1000);
       report->setMinimumHeight(160);
-      report->setPlainText(cameraReport
-                               ? "Select an authorized Android 12+ phone, then "
-                                 "inspect it while no mirror is running. Copy "
-                                 "a camera ID, size and supported frame rate "
-                                 "into the fields above. Android's declared "
-                                 "combinations may be incomplete or inaccurate."
-                               : "Select an authorized phone in Connected "
-                                 "devices, then inspect it while no mirror is "
-                                 "running. Copy a display ID or matching "
-                                 "encoder name into the fields above. Listed "
-                                 "resources may change after reconnecting.");
+      report->setPlainText(
+          cameraReport ? "Select an authorized Android 12+ phone, then "
+                         "inspect it while no mirror is running. Copy "
+                         "a camera ID, size and supported frame rate "
+                         "into the fields above. Android's declared "
+                         "combinations may be incomplete or inaccurate."
+          : appReport  ? "Select an authorized phone, then inspect it "
+                         "while no mirror is running. Search installed "
+                         "applications above by name or package."
+                       : "Select an authorized phone in Connected "
+                         "devices, then inspect it while no mirror is "
+                         "running. Copy a display ID or matching "
+                         "encoder name into the fields above. Listed "
+                         "resources may change after reconnecting.");
       fields->addRow(report);
       connect(inspect, &QPushButton::clicked, this,
               [this] { engine.inspectDevice(selectedSerial()); });
       connect(cancel, &QPushButton::clicked, &engine,
               &Engine::cancelInspection);
       connect(&engine, &Engine::inspectionResult, report,
-              [this, report, cameraReport](const QString &serial,
-                                           const QString &output) {
+              [this, report, cameraReport, appReport](const QString &serial,
+                                                      const QString &output) {
                 report->setPlainText("Device: " + serial + "\n\n" + output);
                 if (cameraReport)
                   setCameraCapabilities(serial, output);
+                else if (appReport)
+                  setAppCapabilities(serial, output);
                 else
                   setDeviceCapabilities(serial, output);
               });
@@ -1087,6 +1124,7 @@ QWidget *Window::settingsPage() {
   }
   updateCameraSelectors();
   updateDeviceCapabilitySelectors();
+  updateAppSelector();
   auto *noResults = label("No matching settings in this release.", "muted");
   noResults->hide();
   layout->addWidget(noResults);
@@ -1311,6 +1349,40 @@ void Window::updateDeviceCapabilitySelectors() {
                               !displayCapabilities.isEmpty());
   videoEncoderSelector->setEnabled(videoEncoderSelector->count() > 1);
 }
+void Window::setAppCapabilities(const QString &serial, const QString &report) {
+  if (serial != selectedSerial()) {
+    appCapabilitySerial.clear();
+    appCapabilities.clear();
+  } else {
+    appCapabilities = parseAppCapabilities(report);
+    appCapabilitySerial = appCapabilities.isEmpty() ? QString{} : serial;
+  }
+  updateAppSelector();
+}
+void Window::updateAppSelector() {
+  if (!appSelector)
+    return;
+  const QSignalBlocker blocker(appSelector);
+  const auto selectedPackage =
+      engine.preferences.options.value("start-app").toString().trimmed();
+  appSelector->clear();
+  appSelector->addItem(appCapabilities.isEmpty()
+                           ? "Inspect phone to discover applications"
+                           : "Search installed applications",
+                       QString{});
+  for (const auto &app : appCapabilities) {
+    const auto system = app.system ? " (system)" : QString{};
+    appSelector->addItem(app.name + " (" + app.package + ")" + system,
+                         app.package);
+  }
+  appSelector->setCurrentIndex(qMax(0, appSelector->findData(selectedPackage)));
+  const bool virtualDisplay =
+      engine.preferences.options.value("virtual-display", false).toBool();
+  const bool readOnly =
+      engine.preferences.options.value("no-control", false).toBool();
+  appSelector->setEnabled(virtualDisplay && !readOnly &&
+                          !appCapabilities.isEmpty());
+}
 void Window::savePreferences() {
   engine.preferences.save(settings);
   for (const auto &option : sessionOptions())
@@ -1435,6 +1507,12 @@ void Window::updateActions() {
     displayCapabilities.clear();
     videoEncoderCapabilities.clear();
     updateDeviceCapabilitySelectors();
+  }
+  if (!appCapabilitySerial.isEmpty() &&
+      appCapabilitySerial != selectedSerial()) {
+    appCapabilitySerial.clear();
+    appCapabilities.clear();
+    updateAppSelector();
   }
   auto *item = deviceList->currentItem();
   const auto state = item ? item->data(Qt::UserRole + 1).toString() : QString{};

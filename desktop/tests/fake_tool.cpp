@@ -39,7 +39,12 @@ int main(int argc, char **argv) {
            "fps={30, 60}, zoom-range=[1, 8])\n"
         << "   - 1920x1080\n   - 1280x720\n"
         << "   High speed capture (--camera-high-speed):\n"
-        << "     - 1280x720 (fps={120, 240})\n";
+        << "     - 1280x720 (fps={120, 240})\n"
+        << "List of apps:\n"
+        << " * Settings                      com.android.settings\n"
+        << " - Calculator                    com.example.calculator\n"
+        << " - A deliberately long application name\n"
+        << "                               com.example.longname\n";
     return 0;
   }
   if (args.contains("keyevent")) {

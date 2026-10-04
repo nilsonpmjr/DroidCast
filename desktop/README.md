@@ -95,10 +95,12 @@ Windows/macOS build paths have not yet been exercised.
   has cancellation and a timeout; it does not start a mirror.
   The **Virtual display** category adds Android 10+ display creation, resolution/
   density, flexible resizing, keyboard placement, system decorations and app
-  handling on close. An optional exact Android package starts on that display;
-  no search or force-stop prefix is accepted. Some phones have no launcher there,
-  so leaving the package empty may produce no video. These changes take effect
-  only after explicitly starting a session.
+  handling on close. Inspecting the selected phone populates a searchable installed-
+  app picker with system apps identified; choosing one writes its exact package into
+  the existing validated field. Manual packages remain supported, and no search or
+  force-stop prefix is sent to scrcpy. Some phones have no launcher there, so leaving
+  the package empty may produce no video. These changes take effect only after
+  explicitly starting a session.
   The **Camera** category adds Android 12+ camera capture with source, exact ID or
   facing, exact size or aspect ratio, frame rate, high-speed mode, torch and zoom.
   Dependent controls prevent combinations rejected by scrcpy. Inspect an idle

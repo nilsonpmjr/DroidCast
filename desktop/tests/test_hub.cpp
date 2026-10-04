@@ -4,6 +4,7 @@
 #include <QApplication>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QCompleter>
 #include <QImage>
 #include <QLabel>
 #include <QLineEdit>
@@ -103,6 +104,26 @@ private slots:
     QVERIFY(parseVideoEncoderCapabilities("List of video encoders:\n malformed")
                 .isEmpty());
     QVERIFY(parseDisplayCapabilities("--display-id=0 (1x1)").isEmpty());
+  }
+  void parsesInstalledAppsDefensively() {
+    const auto apps = parseAppCapabilities(
+        "noise\nList of apps:\n"
+        " * Settings                      com.android.settings\n"
+        " - Calculator                    com.example.calculator\n"
+        " - A deliberately long application name\n"
+        "                               com.example.longname\n"
+        " malformed\nList of cameras:\n"
+        " - Ignored                       com.example.ignored\n");
+    QCOMPARE(apps.size(), 3);
+    QCOMPARE(apps[0].name, QString("Settings"));
+    QCOMPARE(apps[0].package, QString("com.android.settings"));
+    QVERIFY(apps[0].system);
+    QCOMPARE(apps[1].name, QString("Calculator"));
+    QVERIFY(!apps[1].system);
+    QCOMPARE(apps[2].name, QString("A deliberately long application name"));
+    QCOMPARE(apps[2].package, QString("com.example.longname"));
+    QVERIFY(parseAppCapabilities("List of apps:\n (none)").isEmpty());
+    QVERIFY(parseAppCapabilities("- App  com.example.outside").isEmpty());
   }
   void cameraArgumentsValidationAndDependencies() {
     Preferences prefs;
@@ -669,8 +690,9 @@ private slots:
     auto *enabled = window.findChild<QCheckBox *>("option-virtual-display");
     auto *size = window.findChild<QLineEdit *>("option-new-display");
     auto *app = window.findChild<QLineEdit *>("option-start-app");
+    auto *picker = window.findChild<QComboBox *>("detectedApp");
     auto *flex = window.findChild<QCheckBox *>("option-flex-display");
-    QVERIFY(enabled && size && app && flex);
+    QVERIFY(enabled && size && app && picker && flex);
     QVERIFY(!size->isEnabled());
     enabled->setChecked(true);
     QVERIFY(size->isEnabled());
@@ -685,12 +707,49 @@ private slots:
     QVERIFY(!window.findChild<QLabel *>("error-new-display")->isHidden());
     window.findChild<QCheckBox *>("option-no-control")->setChecked(true);
     QVERIFY(!app->isEnabled());
+    QVERIFY(!picker->isEnabled());
     QVERIFY(!flex->isEnabled());
     QVERIFY(size->isEnabled());
     auto *scroll = qobject_cast<QScrollArea *>(
         window.findChild<QStackedWidget *>()->currentWidget());
     QVERIFY(scroll);
     QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    bundledPreferences().save(settings);
+  }
+  void installedAppPickerIsSearchableAndTargetScoped() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(5);
+    window.findChild<QComboBox *>("settingsCategory")
+        ->setCurrentText("Virtual display");
+    auto *picker = window.findChild<QComboBox *>("detectedApp");
+    auto *app = window.findChild<QLineEdit *>("option-start-app");
+    auto *enabled = window.findChild<QCheckBox *>("option-virtual-display");
+    auto *inspect = window.findChild<QPushButton *>("inspectApps");
+    QVERIFY(picker && app && enabled && inspect);
+    QVERIFY(picker->isEditable());
+    QCOMPARE(picker->completer()->filterMode(), Qt::MatchContains);
+    QVERIFY(!picker->isEnabled());
+    QTRY_VERIFY(inspect->isEnabled());
+    inspect->click();
+    QTRY_COMPARE(picker->count(), 4);
+    enabled->setChecked(true);
+    QVERIFY(picker->isEnabled());
+    const int index = picker->findData("com.example.calculator");
+    QVERIFY(index > 0);
+    picker->setCurrentIndex(index);
+    QMetaObject::invokeMethod(picker, "activated", Qt::DirectConnection,
+                              Q_ARG(int, index));
+    QCOMPARE(app->text(), QString("com.example.calculator"));
+    app->setText("vendor.manual.app");
+    QMetaObject::invokeMethod(app, "editingFinished", Qt::DirectConnection);
+    QCOMPARE(picker->currentIndex(), 0);
+    window.findChild<QListWidget *>("devices")->setCurrentRow(1);
+    QCOMPARE(picker->count(), 1);
+    QVERIFY(!picker->isEnabled());
     bundledPreferences().save(settings);
   }
   void advancedVideoValidationAndArguments() {
@@ -742,7 +801,7 @@ private slots:
     QCOMPARE(results.last()[0].toString(), QString("PHONE123"));
     QVERIFY(results.last()[1].toString().contains(
         "--serial=PHONE123|--list-displays|--list-encoders|"
-        "--list-camera-sizes"));
+        "--list-camera-sizes|--list-apps"));
     QVERIFY(results.last()[1].toString().contains("c2.android.avc.encoder"));
     QVERIFY(results.last()[1].toString().contains("--camera-id=0"));
     QVERIFY(!engine.running());

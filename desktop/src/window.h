@@ -35,11 +35,13 @@ private:
   QComboBox *captureFilter,
       *cameraIdSelector = nullptr, *cameraSizeSelector = nullptr,
       *cameraFpsSelector = nullptr, *displaySelector = nullptr,
-      *videoEncoderSelector = nullptr;
-  QString fingerprint, cameraCapabilitySerial, deviceCapabilitySerial;
+      *videoEncoderSelector = nullptr, *appSelector = nullptr;
+  QString fingerprint, cameraCapabilitySerial, deviceCapabilitySerial,
+      appCapabilitySerial;
   QList<CameraCapability> cameraCapabilities;
   QList<DisplayCapability> displayCapabilities;
   QList<VideoEncoderCapability> videoEncoderCapabilities;
+  QList<AppCapability> appCapabilities;
   bool closing = false;
   QWidget *devicesPage();
   QWidget *sessionPage();
@@ -56,6 +58,8 @@ private:
   void updateCameraSelectors();
   void setDeviceCapabilities(const QString &serial, const QString &report);
   void updateDeviceCapabilitySelectors();
+  void setAppCapabilities(const QString &serial, const QString &report);
+  void updateAppSelector();
   void launch(bool record);
   QString selectedSerial() const;
   void captureScreen();

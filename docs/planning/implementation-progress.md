@@ -273,3 +273,20 @@ device compatibility testing remain open.
   inspected records are cleared when the selected target changes.
 - Tests cover selector population and write-through, codec filtering, manual fallback,
   target isolation and the no-horizontal-scroll contract at 920×680.
+
+## Part 14: searchable installed-app picker
+
+- Added `--list-apps` to the existing asynchronous, selected-device inspection rather
+  than introducing an ADB shell parser or a second competing discovery path.
+- Added a defensive parser for regular and wrapped scrcpy app-list rows. App name,
+  exact package and system-app status remain structured and stop at the next report.
+- Added a searchable picker in Virtual display settings. Matching is case-insensitive
+  and works anywhere in the visible name/package text; choosing an entry writes the
+  exact package through the existing validated `start-app` field.
+- The picker is enabled only when virtual display and control are enabled. Manual
+  package fallback remains available, inspection data is target-scoped, and changing
+  phones clears the list.
+- Installed-app contents are shown only in the settings report/picker and are not
+  copied into diagnostics. Tests cover malformed/wrapped rows, search configuration,
+  selection write-through, read-only dependencies, manual fallback, target isolation
+  and the 920×680 layout. Real Android 10+ launch remains release-proof work.

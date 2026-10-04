@@ -27,7 +27,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
 | Audio | Partial | Enablement, source, codec and buffers. | Duplication, encoder/bitrate, require-audio, audio-only and playback policies. |
 | Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior and UHID gamepad. | Mouse bindings, shortcut modifier, AOA modes, gesture help and peripheral tests. |
-| Virtual display | Partial | Creation, size/DPI, flex, package launch, IME, decorations and close policy. | Structured app picker and Android 10+ hardware journeys. |
+| Virtual display | Partial | Creation, size/DPI, flex, searchable inspected-app picker, manual package fallback, IME, decorations and close policy. | Android 10+ hardware journeys. |
 | Camera | Partial | Source, ID/facing, guided declared size/FPS/high-speed choices, manual fallback, startup torch/zoom and live torch/zoom. | Android-version/capability gates and real camera tests. |
 | Recording | Partial | MKV/MP4, rotation, time limit, unique paths and graceful finalization state. | Audio-only/no-playback workflows and playback verification of real files. |
 | Embedded video | Open decision | The engine opens a separate native mirror window. | Decide release scope; prototype a real frame inside Qt before promising it. |
@@ -36,26 +36,26 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
 
-## Completed slice: guided display and encoder capabilities
+## Next implementation: explicit clipboard actions
 
-The parser and configuration UI are implemented. Like the camera work,
-declarations guide valid choices without pretending they guarantee runtime support.
+This completes the remaining routine interaction in ticket 15. Clipboard contents
+are private data, so the implementation must not treat them like ordinary command
+diagnostics.
 
-1. **Done:** parse display IDs/sizes and codec-grouped video encoders from the
-   bounded inspection report, stopping cleanly at unrelated sections.
-2. **Done:** keep the raw report and manual values available for incomplete vendor output.
-3. **Done:** populate a display selector without confusing a physical display with a new
-   virtual display; choosing one must update the existing validated `display-id`.
-4. **Done:** group encoder choices by codec and show only encoders compatible with the chosen
-   H.264/H.265/AV1 codec while preserving an unlisted manual encoder value.
-5. **Done:** cache declarations only for the selected connection and clear them on target
-   change, failed inspection or an empty/malformed report.
-6. **Done:** keep camera-mode dependencies intact: display choice is disabled for camera, while
-   camera guidance remains isolated from display/encoder guidance.
-7. **Done:** test multi-display/multi-codec, malformed output, manual fallback, target isolation,
-   keyboard access and 920×680 layout.
-8. Verify at least one hardware encoder and a non-primary display on real devices;
-   record rejected choices as runtime evidence rather than hiding them.
+1. Define separate Copy from Android and Paste to Android actions; do not overload
+   clipboard autosync or imply continuous synchronization.
+2. Extend the private bridge with explicit capability and result events. Do not put
+   clipboard text in protocol status lines, diagnostics or test failure output.
+3. Use scrcpy's controller/device-message paths and enforce bounded payloads; avoid
+   shell commands and ADB clipboard workarounds.
+4. Disable both actions when no control channel exists, during camera sessions, after
+   disconnect and while another bridge request is pending.
+5. Show only outcome/status text in the workspace. Never display clipboard contents
+   unless the user pastes them into another application themselves.
+6. Test empty, Unicode and maximum-size content, wrong target, read-only, unavailable,
+   timeout, stale replies and clean stop without recording payloads in logs.
+7. Verify Android-version restrictions and host clipboard behavior on Linux, Windows
+   and macOS before claiming cross-platform support.
 
 ## Release-proof still required for recent work
 
