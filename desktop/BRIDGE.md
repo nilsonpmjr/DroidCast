@@ -15,6 +15,8 @@ their normal stdin behavior. The desktop generates a new token per launch.
   `recording-error`, `ended`, `disconnected`, `failed`.
 - Window events: `window-controls-ready` and
   `window-result:<byte>:handled` / `window-result:<byte>:unavailable`.
+- Android events: `android-controls-ready` and
+  `android-result:<byte>:handled` / `android-result:<byte>:unavailable`.
 - Camera events: `camera-controls-ready` and
   `camera-result:<byte>:handled` / `camera-result:<byte>:unavailable`.
 - `first-frame` is emitted once, after uploading and rendering a video frame.
@@ -32,6 +34,15 @@ their normal stdin behavior. The desktop generates a new token per launch.
 | `L` / `R` | Rotate the displayed image left / right |
 | `P` / `U` | Pause / resume the displayed image |
 
+| Byte | Android device action |
+| --- | --- |
+| `0` / `1` | Request Android display power off / on |
+| `N` | Expand the notification panel |
+| `S` | Expand Quick Settings |
+| `C` | Collapse system panels |
+| `D` | Rotate the Android device |
+| `V` | Request a fresh video key frame |
+
 | Byte | Live camera action |
 | --- | --- |
 | `T` / `t` | Request torch on / off |
@@ -43,6 +54,13 @@ the camera HAL may still reject unsupported torch or zoom behavior. Zoom is
 unavailable while the mirror image is paused. DroidCast therefore reports a
 request, not an invented torch state or zoom value.
 
+Android device commands are advertised only after the first frame of a
+non-camera session with the control channel enabled. They are not advertised in
+read-only mode or by an older bundled engine. The result confirms that scrcpy
+queued the control message; Android may still reject it. They are unavailable
+while the displayed image is paused. `Rotate Android` changes the phone-side
+orientation, while `L` / `R` rotate only the image presented by the computer.
+
 Ordinary window commands do not mutate Android and are allowed in read-only mode.
 With `--flex-display`, resizing propagates to the Android virtual display;
 DroidCast disables that mode when read-only is selected. Pause
@@ -52,11 +70,11 @@ the window manager honored the requested geometry/fullscreen state. The desktop
 does not maintain optimistic fullscreen or paused toggle state, so keyboard
 shortcuts in the mirror cannot leave a stale toggle in the desktop UI.
 
-Only one bridge command can be outstanding. After two seconds without a matching
-response, the desktop disables that command family until a new session starts.
-It never retries toggles automatically, and late replies cannot complete a later
-command in the same session. A camera timeout does not disable window controls,
-and Stop remains available independently.
+Only one bridge command can be outstanding across all three families. After two
+seconds without a matching response, the desktop disables that command family
+until a new session starts. It never retries toggles automatically, and late
+replies cannot complete a later command in the same session. A camera or Android
+timeout does not disable window controls, and Stop remains available independently.
 
 The desktop gives normal cleanup five seconds, then kills an unresponsive child
 and preserves an incomplete-recording warning. Killing the parent or a machine

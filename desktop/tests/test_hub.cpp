@@ -214,6 +214,87 @@ private slots:
     engine.stop();
     QTRY_VERIFY(!engine.running());
   }
+  void androidCommandsRequireCapabilityAndControl() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy feedback(&engine, &Engine::androidControlMessage);
+    QVERIFY(!engine.androidControlsAvailable());
+    engine.androidAction(Engine::AndroidAction::DisplayOff);
+    QVERIFY(feedback.last().first().toString().contains("waiting"));
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY_WITH_TIMEOUT(engine.androidControlsAvailable(), 3000);
+    for (const auto action :
+         {Engine::AndroidAction::DisplayOff, Engine::AndroidAction::DisplayOn,
+          Engine::AndroidAction::Notifications,
+          Engine::AndroidAction::QuickSettings,
+          Engine::AndroidAction::CollapsePanels,
+          Engine::AndroidAction::RotateDevice,
+          Engine::AndroidAction::ResetVideo}) {
+      engine.androidAction(action);
+      QVERIFY(!engine.androidControlsAvailable());
+      QTRY_VERIFY_WITH_TIMEOUT(engine.androidControlsAvailable(), 3000);
+      QVERIFY(feedback.last().first().toString().contains("queued"));
+    }
+    QVERIFY(feedback.last().first().toString().contains("Video reset"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    engine.preferences.options["no-control"] = true;
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE_WITH_TIMEOUT(engine.sessionState(),
+                              Engine::SessionState::Streaming, 3000);
+    QVERIFY(!engine.androidControlsAvailable());
+    engine.androidAction(Engine::AndroidAction::DisplayOn);
+    QVERIFY(feedback.last().first().toString().contains("read-only"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    engine.preferences.options["no-control"] = false;
+    engine.preferences.options["video-source"] = "camera";
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE_WITH_TIMEOUT(engine.sessionState(),
+                              Engine::SessionState::Streaming, 3000);
+    QVERIFY(!engine.androidControlsAvailable());
+    engine.androidAction(Engine::AndroidAction::RotateDevice);
+    QVERIFY(feedback.last().first().toString().contains("camera capture"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+  }
+  void androidCommandsHandleUnavailableTimeoutAndOldEngine() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy feedback(&engine, &Engine::androidControlMessage);
+
+    qputenv("HUB_TEST_MODE", "android-unavailable");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.androidControlsAvailable());
+    engine.androidAction(Engine::AndroidAction::Notifications);
+    QTRY_VERIFY(engine.androidControlsAvailable());
+    QVERIFY(feedback.last().first().toString().contains("unavailable"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    qputenv("HUB_TEST_MODE", "android-timeout");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.androidControlsAvailable());
+    engine.androidAction(Engine::AndroidAction::RotateDevice);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        feedback.last().first().toString().contains("No confirmation"), 4000);
+    QVERIFY(!engine.androidControlsAvailable());
+    QVERIFY(engine.windowControlsAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    qputenv("HUB_TEST_MODE", "old-android-bridge");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    QVERIFY(engine.windowControlsAvailable());
+    QVERIFY(!engine.androidControlsAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+  }
   void cameraSessionPanelIsContextualAndActionable() {
     QSettings settings;
     auto prefs = bundledPreferences();
@@ -226,6 +307,8 @@ private slots:
     auto *panel = window.findChild<QWidget *>("cameraControlsPanel");
     auto *feedback = window.findChild<QLabel *>("cameraControlFeedback");
     QVERIFY(panel && feedback);
+    auto *androidPanel = window.findChild<QWidget *>("androidControlsPanel");
+    QVERIFY(androidPanel && androidPanel->isHidden());
     QList<QPushButton *> controls;
     QPushButton *torchOn = nullptr;
     for (auto *button : window.findChildren<QPushButton *>()) {
@@ -244,6 +327,7 @@ private slots:
     QTRY_VERIFY(start->isEnabled());
     start->click();
     QTRY_VERIFY(!panel->isHidden());
+    QVERIFY(androidPanel->isHidden());
     QTRY_VERIFY(torchOn->isEnabled());
     auto *scroll = qobject_cast<QScrollArea *>(
         window.findChild<QStackedWidget *>()->currentWidget());
@@ -260,6 +344,46 @@ private slots:
     QVERIFY(panel->isHidden());
     prefs.options.clear();
     prefs.save(settings);
+  }
+  void androidSessionPanelIsLabelledAndActionable() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(1);
+    auto *panel = window.findChild<QWidget *>("androidControlsPanel");
+    auto *feedback = window.findChild<QLabel *>("androidControlFeedback");
+    QVERIFY(panel && feedback);
+    QList<QPushButton *> controls;
+    QPushButton *rotate = nullptr;
+    for (auto *button : window.findChildren<QPushButton *>()) {
+      if (!button->property("androidControl").toBool())
+        continue;
+      controls.append(button);
+      QVERIFY(!button->isEnabled());
+      QVERIFY(button->accessibleName().startsWith("Android device:"));
+      if (button->text() == "Rotate Android")
+        rotate = button;
+    }
+    QCOMPARE(controls.size(), 7);
+    QVERIFY(rotate);
+    QVERIFY(panel->isHidden());
+    auto *start = window.findChild<QPushButton *>("startMirror");
+    QTRY_VERIFY(start->isEnabled());
+    start->click();
+    QTRY_VERIFY(!panel->isHidden());
+    QTRY_VERIFY(rotate->isEnabled());
+    rotate->click();
+    QTRY_VERIFY(feedback->text().contains("rotation request queued"));
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    window.findChild<QPushButton *>("stopMirror")->click();
+    QTRY_VERIFY(start->isEnabled());
+    QVERIFY(panel->isHidden());
+    bundledPreferences().save(settings);
   }
   void cameraControlsFollowTheSelectedSource() {
     QSettings settings;

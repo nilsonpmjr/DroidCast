@@ -953,7 +953,9 @@ sc_screen_apply_frame(struct sc_screen *screen, bool can_resize) {
 
     sc_screen_render(screen, false);
     sc_desktop_bridge_first_frame();
-    if (screen->camera) {
+    if (screen->controller && !screen->camera) {
+        sc_desktop_bridge_android_controls_ready();
+    } else if (screen->controller && screen->camera) {
         sc_desktop_bridge_camera_controls_ready();
     }
     return true;
@@ -1141,6 +1143,54 @@ sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
     switch (event->type) {
         case SC_EVENT_DESKTOP_WINDOW_COMMAND: {
             char command = (char) event->user.code;
+            bool android_command = command == '0' || command == '1'
+                                || command == 'N' || command == 'S'
+                                || command == 'C' || command == 'D'
+                                || command == 'V';
+            if (android_command) {
+                bool available = screen->controller && !screen->camera
+                              && !screen->disconnected && !screen->paused;
+                bool handled = false;
+                if (available) {
+                    enum sc_desktop_android_action action =
+                        SC_DESKTOP_ANDROID_RESET_VIDEO;
+                    switch (command) {
+                        case '0':
+                            action = SC_DESKTOP_ANDROID_DISPLAY_OFF;
+                            break;
+                        case '1':
+                            action = SC_DESKTOP_ANDROID_DISPLAY_ON;
+                            break;
+                        case 'N':
+                            action = SC_DESKTOP_ANDROID_NOTIFICATIONS;
+                            break;
+                        case 'S':
+                            action = SC_DESKTOP_ANDROID_QUICK_SETTINGS;
+                            break;
+                        case 'C':
+                            action = SC_DESKTOP_ANDROID_COLLAPSE_PANELS;
+                            break;
+                        case 'D':
+                            action = SC_DESKTOP_ANDROID_ROTATE_DEVICE;
+                            break;
+                        case 'V':
+                            action = SC_DESKTOP_ANDROID_RESET_VIDEO;
+                            break;
+                        default:
+                            available = false;
+                            break;
+                    }
+                    if (available) {
+                        handled = sc_input_manager_desktop_android_action(
+                            &screen->im, action);
+                    }
+                }
+                char result[64];
+                snprintf(result, sizeof(result), "android-result:%c:%s",
+                         command, handled ? "handled" : "unavailable");
+                sc_desktop_bridge_report(result);
+                return;
+            }
             bool camera_command = command == 'T' || command == 't'
                                || command == '+' || command == '-';
             if (camera_command) {

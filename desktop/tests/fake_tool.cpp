@@ -103,8 +103,12 @@ int main(int argc, char **argv) {
       report("first-frame");
       if (mode != "old-bridge") {
         report("window-controls-ready");
-        if (args.contains("--video-source=camera") &&
-            mode != "old-camera-bridge")
+        if (!args.contains("--video-source=camera") &&
+            !args.contains("--no-control") && mode != "old-android-bridge")
+          report("android-controls-ready");
+        else if (args.contains("--video-source=camera") &&
+                 !args.contains("--no-control") &&
+                 mode != "old-camera-bridge")
           report("camera-controls-ready");
       }
     });
@@ -142,6 +146,14 @@ int main(int argc, char **argv) {
       if (mode != "camera-timeout")
         report(QString("camera-result:%1:%2")
                    .arg(QChar(command), mode == "camera-unavailable"
+                                            ? "unavailable"
+                                            : "handled"));
+      return;
+    }
+    if (QByteArray("01NSCDV").contains(command)) {
+      if (mode != "android-timeout")
+        report(QString("android-result:%1:%2")
+                   .arg(QChar(command), mode == "android-unavailable"
                                             ? "unavailable"
                                             : "handled"));
       return;

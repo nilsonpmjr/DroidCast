@@ -68,6 +68,9 @@ Windows/macOS build paths have not yet been exercised.
   Window controls provide fullscreen, fit/pixel-perfect sizing, rotation and
   pause/resume through the fork. Pausing freezes only the computer image; audio
   and recording continue. These host-only controls also work in read-only mode.
+  Display sessions add explicit Android screen on/off, notification, Quick
+  Settings, collapse-panels, device rotation and video-reset actions. They are
+  capability-gated, serialized and disabled in read-only or camera sessions.
   Camera sessions reveal contextual torch on/off and relative zoom controls.
   They use scrcpy's Android control channel, so they are unavailable in read-only
   mode and report requests rather than assuming the hardware accepted them.
@@ -152,7 +155,7 @@ artwork: the iMac variant for desktop hosts and the MacBook variant when a lapto
 can be identified from host power/model information. Unknown form factors safely
 fall back to Desktop. The original TS project remains untouched.
 
-Next: validate display, virtual-display and camera sessions with physical devices;
-expand the private engine bridge with more Android control-channel actions;
+Next: validate display, virtual-display, Android actions and camera sessions with
+physical devices; turn inspected display/encoder declarations into guided choices;
 integrate live video into the workspace; add per-device profiles and concurrent
 sessions; then finish standalone platform installers.

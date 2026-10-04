@@ -82,4 +82,18 @@ sc_input_manager_camera_zoom_in(struct sc_input_manager *im);
 bool
 sc_input_manager_camera_zoom_out(struct sc_input_manager *im);
 
+enum sc_desktop_android_action {
+    SC_DESKTOP_ANDROID_DISPLAY_OFF,
+    SC_DESKTOP_ANDROID_DISPLAY_ON,
+    SC_DESKTOP_ANDROID_NOTIFICATIONS,
+    SC_DESKTOP_ANDROID_QUICK_SETTINGS,
+    SC_DESKTOP_ANDROID_COLLAPSE_PANELS,
+    SC_DESKTOP_ANDROID_ROTATE_DEVICE,
+    SC_DESKTOP_ANDROID_RESET_VIDEO,
+};
+
+bool
+sc_input_manager_desktop_android_action(
+    struct sc_input_manager *im, enum sc_desktop_android_action action);
+
 #endif

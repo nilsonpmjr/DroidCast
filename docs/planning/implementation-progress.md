@@ -225,3 +225,25 @@ device compatibility testing remain open.
 - Tests cover normal multi-camera reports, high-speed pairs, malformed/empty input,
   selector write-through, manual fallback and target isolation. Real-device proof
   and Android-version gating remain open.
+
+## Part 11: Android display and system-panel actions
+
+- Extended the opt-in bridge with an explicit `android-controls-ready` capability
+  and result events for screen off/on, notifications, Quick Settings, panel collapse,
+  Android device rotation and reset video. Older engines never enable the controls.
+- Routed every action through scrcpy's existing controller queue on the SDL thread.
+  No shell command or synthesized keyboard shortcut is used. A handled response means
+  queued, not that Android or an OEM policy honored the request.
+- Kept Android device rotation distinct from mirror-window rotation in the API,
+  labels, accessibility names and feedback. The session workspace explains the
+  difference next to the controls.
+- Android actions are hidden for camera sessions and disabled in read-only mode.
+  They share one in-flight bridge slot with window and camera commands, use a
+  two-second timeout, never retry, and only disable their own family after timeout.
+- Added a contextual, keyboard-accessible seven-button group that remains within the
+  920×680 layout without horizontal scrolling. Local status reports readiness,
+  queued, unavailable and timeout outcomes.
+- Verification covers every command byte, real pipe-to-SDL delivery, capability and
+  old-engine behavior, wrong mode/read-only, unavailable responses, timeout isolation,
+  clean stop and UI context. Physical Android behavior remains in the release-proof
+  list.

@@ -92,6 +92,17 @@ public:
   enum class CameraAction { TorchOn, TorchOff, ZoomIn, ZoomOut };
   void cameraAction(CameraAction action);
   bool cameraControlsAvailable() const;
+  enum class AndroidAction {
+    DisplayOff,
+    DisplayOn,
+    Notifications,
+    QuickSettings,
+    CollapsePanels,
+    RotateDevice,
+    ResetVideo
+  };
+  void androidAction(AndroidAction action);
+  bool androidControlsAvailable() const;
   enum class SessionState {
     Idle,
     Starting,
@@ -125,6 +136,8 @@ signals:
   void windowControlMessage(const QString &text);
   void cameraControlsChanged();
   void cameraControlMessage(const QString &text);
+  void androidControlsChanged();
+  void androidControlMessage(const QString &text);
   void captureSaved(const QString &path);
   void message(const QString &text);
   void log(const QString &text);
@@ -149,10 +162,11 @@ private:
   bool forcedStop = false, bridgeReady = false, recordingFinalized = false,
        recordingFailed = false;
   QByteArray sessionToken, mirrorOutput;
-  QTimer windowCommandTimeout;
+  QTimer bridgeCommandTimeout;
   bool windowCommandsReady = false, windowCommandsHealthy = true;
   bool cameraCommandsReady = false, cameraCommandsHealthy = true;
-  char pendingWindowCommand = 0;
+  bool androidCommandsReady = false, androidCommandsHealthy = true;
+  char pendingBridgeCommand = 0;
   void readMirrorOutput();
   QByteArray scanOutput, wirelessOutput, pairingInput;
 };

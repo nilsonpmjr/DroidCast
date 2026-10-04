@@ -23,7 +23,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Session lifecycle | Partial | First-frame state, graceful stop, recording finalization and disconnect/failure states. | Real unplug/reconnect and playable-recording tests on phones. |
 | Device workspace | Partial | USB discovery, wireless pair/connect, screenshots, APK install and selected-device targeting. | Complete pair-to-mirror guidance and broader recovery testing. |
 | Configuration routes | Partial | Searchable Video, Camera, Audio, Device, Window, Keyboard, Mouse, Gamepad, Recording and Virtual display categories. | Connection/Tunnels, Control, OTG, Video4Linux and complete Shortcuts routes. |
-| Toolbar | Partial | Back/Home/Recents, power, volume, mirror-window actions and contextual camera controls. | Panels, clipboard, display power, app/file actions, reset video and measured FPS. |
+| Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, Android/window rotation, reset video, mirror-window actions and contextual camera controls. | Clipboard, app/file actions and measured FPS. |
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, display ID, encoder and inspection. | Codec options, constraint overrides, structured capability selection and hardware proof. |
 | Audio | Partial | Enablement, source, codec and buffers. | Duplication, encoder/bitrate, require-audio, audio-only and playback policies. |
 | Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior and UHID gamepad. | Mouse bindings, shortcut modifier, AOA modes, gesture help and peripheral tests. |
@@ -36,26 +36,26 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
 
-## Next implementation: Android display and panel actions
+## Next implementation: guided display and encoder capabilities
 
-This is the next bounded slice for the active-session toolbar. It extends the same
-versioned bridge used by window and camera commands.
+This is the next bounded slice for the configuration workspace. Like the camera
+work, declarations guide valid choices without pretending they guarantee runtime
+support.
 
-1. Expose scrcpy's existing display-power, notification panel, quick-settings,
-   collapse-panels, device rotation and reset-video actions through named bridge bytes.
-2. Keep host-window rotation separate from Android device rotation in labels and code.
-3. Advertise an explicit Android-actions capability after the controller is ready;
-   older engines must leave the new controls disabled rather than timing out.
-4. Hide camera-incompatible display actions during camera sessions and disable every
-   Android-mutating action in read-only mode.
-5. Serialize requests, acknowledge queueing, apply the existing two-second timeout
-   rule and never retry toggles automatically.
-6. Add accessible toolbar buttons with local feedback and no horizontal overflow at
-   920×680; less frequent actions may live in a compact grouped section.
-7. Test every byte, wrong-mode/read-only behavior, old engines, unavailable results,
-   timeout isolation and clean stop.
-8. Keep clipboard payloads out of this slice; they need a framed variable-length
-   protocol and explicit privacy/logging tests rather than a single command byte.
+1. Parse display IDs/sizes and video encoders from the bounded inspection report.
+2. Keep the raw report and manual values available for incomplete vendor output.
+3. Populate a display selector without confusing a physical display with a new
+   virtual display; choosing one must update the existing validated `display-id`.
+4. Group encoder choices by codec and show only encoders compatible with the chosen
+   H.264/H.265/AV1 codec while preserving an unlisted manual encoder value.
+5. Cache declarations only for the selected connection and clear them on target
+   change, failed inspection or an empty/malformed report.
+6. Keep camera-mode dependencies intact: display choice is disabled for camera, while
+   camera guidance remains isolated from display/encoder guidance.
+7. Test multi-display/multi-codec, malformed output, manual fallback, target isolation,
+   keyboard access and 920×680 layout.
+8. Verify at least one hardware encoder and a non-primary display on real devices;
+   record rejected choices as runtime evidence rather than hiding them.
 
 ## Release-proof still required for recent work
 
@@ -64,6 +64,9 @@ versioned bridge used by window and camera commands.
 - **Camera:** Android 12+ front/back selection, recording, high-speed failure/success,
   torch availability and zoom limits. A bridge result currently means “request queued,”
   not “camera hardware confirmed the change.”
+- **Android actions:** verify screen power, notification/Quick Settings panels,
+  panel collapse, device rotation and reset-video on multiple Android versions.
+  Queue acknowledgement does not prove that Android honored the request.
 - **Cross-platform bridge:** exercise stdin commands and shutdown on Windows; validate
   the app bundle and pipe behavior on macOS.
 - **Host branding:** confirm Desktop/Laptop selection on Windows hardware and both

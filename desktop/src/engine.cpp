@@ -805,16 +805,23 @@ Engine::Engine(QObject *parent) : QObject(parent) {
                                         "authorize the phone and retry.\n\n" +
                                             output);
           });
-  windowCommandTimeout.setSingleShot(true);
-  connect(&windowCommandTimeout, &QTimer::timeout, this, [this] {
+  bridgeCommandTimeout.setSingleShot(true);
+  connect(&bridgeCommandTimeout, &QTimer::timeout, this, [this] {
     const bool cameraCommand =
-        QByteArray("Tt+-").contains(pendingWindowCommand);
-    pendingWindowCommand = 0;
+        QByteArray("Tt+-").contains(pendingBridgeCommand);
+    const bool androidCommand =
+        QByteArray("01NSCDV").contains(pendingBridgeCommand);
+    pendingBridgeCommand = 0;
     if (cameraCommand) {
       cameraCommandsHealthy = false;
       emit cameraControlMessage(
           "No confirmation from the camera. Restart the session to re-enable "
           "camera controls; no command was retried.");
+    } else if (androidCommand) {
+      androidCommandsHealthy = false;
+      emit androidControlMessage(
+          "No confirmation from Android. Restart the session to re-enable "
+          "device actions; no command was retried.");
     } else {
       windowCommandsHealthy = false;
       emit windowControlMessage(
@@ -823,6 +830,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
     }
     emit windowControlsChanged();
     emit cameraControlsChanged();
+    emit androidControlsChanged();
   });
   scanTimeout.setSingleShot(true);
   wirelessTimeout.setSingleShot(true);
@@ -889,7 +897,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
           [this](QProcess::ProcessError error) {
             if (error == QProcess::FailedToStart) {
               stopTimeout.stop();
-              windowCommandTimeout.stop();
+              bridgeCommandTimeout.stop();
               state = SessionState::Failed;
               stopping = false;
               activeSerial.clear();
@@ -902,8 +910,8 @@ Engine::Engine(QObject *parent) : QObject(parent) {
   connect(&mirror, &QProcess::finished, this,
           [this](int code, QProcess::ExitStatus status) {
             stopTimeout.stop();
-            windowCommandTimeout.stop();
-            pendingWindowCommand = 0;
+            bridgeCommandTimeout.stop();
+            pendingBridgeCommand = 0;
             readMirrorOutput();
             const bool clean = code == 0 && status == QProcess::NormalExit &&
                                !forcedStop && !recordingFailed;
@@ -1167,13 +1175,21 @@ bool Engine::start(const QString &serial, const QString &recording) {
   windowCommandsHealthy = true;
   cameraCommandsReady = false;
   cameraCommandsHealthy = true;
-  pendingWindowCommand = 0;
+  androidCommandsReady = false;
+  androidCommandsHealthy = true;
+  pendingBridgeCommand = 0;
   emit windowControlMessage(
       "Window controls become available after the first video frame.");
   emit cameraControlMessage(
       activeCamera ? "Camera controls become available after the "
                      "first video frame."
                    : "Start a camera session to use these controls.");
+  emit androidControlMessage(
+      activeCamera
+          ? "Android display actions are unavailable during camera capture."
+      : activeReadOnly
+          ? "Android device actions are disabled in read-only mode."
+          : "Android device actions become available after the first frame.");
   forcedStop = bridgeReady = recordingFinalized = recordingFailed = false;
   mirrorOutput.clear();
   sessionToken = QUuid::createUuid().toString(QUuid::Id128).toLatin1();
@@ -1191,8 +1207,8 @@ void Engine::stop() {
   if (!running() || stopping)
     return;
   stopping = true;
-  windowCommandTimeout.stop();
-  pendingWindowCommand = 0;
+  bridgeCommandTimeout.stop();
+  pendingBridgeCommand = 0;
   state = SessionState::Stopping;
   emit message("Stopping session and finishing any recording…");
   // The fork handles this on its SDL event loop, following window-close
@@ -1249,6 +1265,15 @@ void Engine::readMirrorOutput() {
                                       "changes the Android virtual display."
                                     : "Window controls ready. These actions "
                                       "affect the computer display only.");
+    } else if (event == "android-controls-ready" && bridgeReady &&
+               !activeCamera) {
+      androidCommandsReady = true;
+      emit androidControlMessage(
+          activeReadOnly
+              ? "Android device actions are disabled in read-only mode."
+              : "Android device actions ready. Requests use scrcpy's "
+                "control channel.");
+      emit androidControlsChanged();
     } else if (event == "camera-controls-ready" && bridgeReady &&
                activeCamera) {
       cameraCommandsReady = true;
@@ -1259,14 +1284,14 @@ void Engine::readMirrorOutput() {
                 "hardware support still varies.");
       emit cameraControlsChanged();
     } else if (event.startsWith("window-result:") && bridgeReady &&
-               pendingWindowCommand) {
+               pendingBridgeCommand) {
       const QByteArray expected =
-          QByteArray("window-result:") + pendingWindowCommand + ':';
+          QByteArray("window-result:") + pendingBridgeCommand + ':';
       if (event == expected + "handled" || event == expected + "unavailable") {
-        windowCommandTimeout.stop();
+        bridgeCommandTimeout.stop();
         const bool handled = event.endsWith(":handled");
-        const char command = pendingWindowCommand;
-        pendingWindowCommand = 0;
+        const char command = pendingBridgeCommand;
+        pendingBridgeCommand = 0;
         emit windowControlMessage(
             !handled ? "This action is unavailable. For resizing, leave "
                        "fullscreen or maximized mode first."
@@ -1276,16 +1301,18 @@ void Engine::readMirrorOutput() {
                              : "Window request handled by the mirror. "
                                "Window-manager restrictions may still apply.");
         emit windowControlsChanged();
+        emit cameraControlsChanged();
+        emit androidControlsChanged();
       }
     } else if (event.startsWith("camera-result:") && bridgeReady &&
-               pendingWindowCommand) {
+               pendingBridgeCommand) {
       const QByteArray expected =
-          QByteArray("camera-result:") + pendingWindowCommand + ':';
+          QByteArray("camera-result:") + pendingBridgeCommand + ':';
       if (event == expected + "handled" || event == expected + "unavailable") {
-        windowCommandTimeout.stop();
+        bridgeCommandTimeout.stop();
         const bool handled = event.endsWith(":handled");
-        const char command = pendingWindowCommand;
-        pendingWindowCommand = 0;
+        const char command = pendingBridgeCommand;
+        pendingBridgeCommand = 0;
         emit cameraControlMessage(
             !handled
                 ? "This camera action is unavailable. Resume a paused image "
@@ -1296,6 +1323,50 @@ void Engine::readMirrorOutput() {
                              : "Zoom-out request sent to the phone.");
         emit cameraControlsChanged();
         emit windowControlsChanged();
+        emit androidControlsChanged();
+      }
+    } else if (event.startsWith("android-result:") && bridgeReady &&
+               pendingBridgeCommand) {
+      const QByteArray expected =
+          QByteArray("android-result:") + pendingBridgeCommand + ':';
+      if (event == expected + "handled" || event == expected + "unavailable") {
+        bridgeCommandTimeout.stop();
+        const bool handled = event.endsWith(":handled");
+        const char command = pendingBridgeCommand;
+        pendingBridgeCommand = 0;
+        QString handledMessage;
+        switch (command) {
+        case '0':
+          handledMessage = "Android display-off request queued.";
+          break;
+        case '1':
+          handledMessage = "Android display-on request queued.";
+          break;
+        case 'N':
+          handledMessage = "Notification panel request queued.";
+          break;
+        case 'S':
+          handledMessage = "Quick Settings request queued.";
+          break;
+        case 'C':
+          handledMessage = "Collapse-panels request queued.";
+          break;
+        case 'D':
+          handledMessage = "Android device rotation request queued.";
+          break;
+        case 'V':
+          handledMessage = "Video reset request queued.";
+          break;
+        default:
+          break;
+        }
+        emit androidControlMessage(
+            handled ? handledMessage
+                    : "This Android action is unavailable. Resume the image "
+                      "or check the session mode and control permissions.");
+        emit androidControlsChanged();
+        emit windowControlsChanged();
+        emit cameraControlsChanged();
       }
     } else if (event == "recording-finalized" && bridgeReady)
       recordingFinalized = true;
@@ -1315,7 +1386,7 @@ void Engine::readMirrorOutput() {
 
 bool Engine::windowControlsAvailable() const {
   return running() && state == SessionState::Streaming && windowCommandsReady &&
-         windowCommandsHealthy && !pendingWindowCommand;
+         windowCommandsHealthy && !pendingBridgeCommand;
 }
 
 void Engine::windowAction(WindowAction action) {
@@ -1350,23 +1421,25 @@ void Engine::windowAction(WindowAction action) {
   default:
     return;
   }
-  pendingWindowCommand = command;
+  pendingBridgeCommand = command;
   if (mirror.write(&command, 1) != 1) {
-    pendingWindowCommand = 0;
+    pendingBridgeCommand = 0;
     windowCommandsHealthy = false;
     emit windowControlMessage(
         "Could not send the window command. Restart the session.");
   } else {
-    windowCommandTimeout.start(2000);
+    bridgeCommandTimeout.start(2000);
     emit windowControlMessage("Waiting for the mirror to handle the request…");
   }
   emit windowControlsChanged();
+  emit cameraControlsChanged();
+  emit androidControlsChanged();
 }
 
 bool Engine::cameraControlsAvailable() const {
   return running() && state == SessionState::Streaming && activeCamera &&
          !activeReadOnly && cameraCommandsReady && cameraCommandsHealthy &&
-         !pendingWindowCommand;
+         !pendingBridgeCommand;
 }
 
 void Engine::cameraAction(CameraAction action) {
@@ -1395,18 +1468,77 @@ void Engine::cameraAction(CameraAction action) {
   default:
     return;
   }
-  pendingWindowCommand = command;
+  pendingBridgeCommand = command;
   if (mirror.write(&command, 1) != 1) {
-    pendingWindowCommand = 0;
+    pendingBridgeCommand = 0;
     cameraCommandsHealthy = false;
     emit cameraControlMessage(
         "Could not send the camera request. Restart the session.");
   } else {
-    windowCommandTimeout.start(2000);
+    bridgeCommandTimeout.start(2000);
     emit cameraControlMessage("Waiting for the camera to handle the request…");
   }
   emit cameraControlsChanged();
   emit windowControlsChanged();
+  emit androidControlsChanged();
+}
+
+bool Engine::androidControlsAvailable() const {
+  return running() && state == SessionState::Streaming && !activeCamera &&
+         !activeReadOnly && androidCommandsReady && androidCommandsHealthy &&
+         !pendingBridgeCommand;
+}
+
+void Engine::androidAction(AndroidAction action) {
+  if (!androidControlsAvailable()) {
+    emit androidControlMessage(
+        cameraSession()
+            ? "Android display actions are unavailable during camera capture."
+        : activeReadOnly
+            ? "Android device actions are disabled in read-only mode."
+            : "Android device actions are waiting for the stream or another "
+              "request.");
+    return;
+  }
+  char command;
+  switch (action) {
+  case AndroidAction::DisplayOff:
+    command = '0';
+    break;
+  case AndroidAction::DisplayOn:
+    command = '1';
+    break;
+  case AndroidAction::Notifications:
+    command = 'N';
+    break;
+  case AndroidAction::QuickSettings:
+    command = 'S';
+    break;
+  case AndroidAction::CollapsePanels:
+    command = 'C';
+    break;
+  case AndroidAction::RotateDevice:
+    command = 'D';
+    break;
+  case AndroidAction::ResetVideo:
+    command = 'V';
+    break;
+  default:
+    return;
+  }
+  pendingBridgeCommand = command;
+  if (mirror.write(&command, 1) != 1) {
+    pendingBridgeCommand = 0;
+    androidCommandsHealthy = false;
+    emit androidControlMessage(
+        "Could not send the Android request. Restart the session.");
+  } else {
+    bridgeCommandTimeout.start(2000);
+    emit androidControlMessage("Waiting for Android to queue the request…");
+  }
+  emit androidControlsChanged();
+  emit windowControlsChanged();
+  emit cameraControlsChanged();
 }
 
 void Engine::connectWireless(const QString &endpoint, const QString &code) {

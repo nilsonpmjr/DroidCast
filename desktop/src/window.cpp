@@ -363,6 +363,61 @@ QWidget *Window::sessionPage() {
             });
   }
   preview->addLayout(phoneControls);
+  auto *androidPanel = new QWidget;
+  androidPanel->setObjectName("androidControlsPanel");
+  auto *androidLayout = new QVBoxLayout(androidPanel);
+  androidLayout->setContentsMargins(0, 6, 0, 0);
+  androidLayout->setSpacing(8);
+  androidLayout->addWidget(label("Android device", "section"));
+  androidLayout->addWidget(label(
+      "Control the phone display and system panels through scrcpy. Android "
+      "rotation changes the device; mirror rotation below changes only the "
+      "computer window.",
+      "muted"));
+  auto *androidControls = new QGridLayout;
+  androidControls->setSpacing(8);
+  int androidIndex = 0;
+  for (const auto &entry :
+       {qMakePair(QString("Screen off"), Engine::AndroidAction::DisplayOff),
+        qMakePair(QString("Screen on"), Engine::AndroidAction::DisplayOn),
+        qMakePair(QString("Notifications"),
+                  Engine::AndroidAction::Notifications),
+        qMakePair(QString("Quick Settings"),
+                  Engine::AndroidAction::QuickSettings),
+        qMakePair(QString("Collapse panels"),
+                  Engine::AndroidAction::CollapsePanels),
+        qMakePair(QString("Rotate Android"),
+                  Engine::AndroidAction::RotateDevice),
+        qMakePair(QString("Reset video"), Engine::AndroidAction::ResetVideo)}) {
+    auto *control = button(entry.first);
+    control->setProperty("androidControl", true);
+    control->setAccessibleName("Android device: " + entry.first);
+    control->setToolTip(entry.first + " on the active Android session.");
+    control->setMinimumHeight(40);
+    if (androidIndex == 6)
+      androidControls->addWidget(control, 3, 0, 1, 2);
+    else
+      androidControls->addWidget(control, androidIndex / 2, androidIndex % 2);
+    ++androidIndex;
+    connect(control, &QPushButton::clicked, this,
+            [this, action = entry.second] { engine.androidAction(action); });
+  }
+  androidLayout->addLayout(androidControls);
+  auto *androidFeedback =
+      label("Start a display session to use Android actions.", "muted");
+  androidFeedback->setObjectName("androidControlFeedback");
+  androidLayout->addWidget(androidFeedback);
+  androidPanel->hide();
+  preview->addWidget(androidPanel);
+  connect(&engine, &Engine::androidControlMessage, androidFeedback,
+          &QLabel::setText);
+  connect(&engine, &Engine::androidControlsChanged, this,
+          &Window::updateActions);
+  connect(&engine, &Engine::sessionChanged, this, [this, androidFeedback] {
+    if (!engine.running())
+      androidFeedback->setText(
+          "Start a display session to use Android actions.");
+  });
   auto *cameraPanel = new QWidget;
   cameraPanel->setObjectName("cameraControlsPanel");
   auto *cameraLayout = new QVBoxLayout(cameraPanel);
@@ -1297,6 +1352,8 @@ void Window::updateActions() {
                           !engine.usesAlternateDisplay());
     else if (control->property("cameraControl").toBool())
       control->setEnabled(engine.cameraControlsAvailable());
+    else if (control->property("androidControl").toBool())
+      control->setEnabled(engine.androidControlsAvailable());
     else if (control->property("windowControl").toBool())
       control->setEnabled(engine.windowControlsAvailable());
     else if (control->property("inspectDevice").toBool())
@@ -1309,6 +1366,8 @@ void Window::updateActions() {
           engine.captureAllowed(control->property("captureSerial").toString()));
   if (auto *cameraPanel = findChild<QWidget *>("cameraControlsPanel"))
     cameraPanel->setVisible(engine.cameraSession());
+  if (auto *androidPanel = findChild<QWidget *>("androidControlsPanel"))
+    androidPanel->setVisible(running && !engine.cameraSession());
   if (state == "unauthorized")
     deviceHelp->setText("Unlock your phone and accept the USB debugging "
                         "prompt. Devices refresh automatically.");

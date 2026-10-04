@@ -304,6 +304,60 @@ reset_video(struct sc_input_manager *im) {
 }
 
 bool
+sc_input_manager_desktop_android_action(
+        struct sc_input_manager *im, enum sc_desktop_android_action action) {
+    assert(im->controller);
+
+    struct sc_control_msg msg;
+    switch (action) {
+        case SC_DESKTOP_ANDROID_DISPLAY_OFF:
+        case SC_DESKTOP_ANDROID_DISPLAY_ON:
+            if (im->camera) {
+                return false;
+            }
+            msg.type = SC_CONTROL_MSG_TYPE_SET_DISPLAY_POWER;
+            msg.set_display_power.on =
+                action == SC_DESKTOP_ANDROID_DISPLAY_ON;
+            break;
+        case SC_DESKTOP_ANDROID_NOTIFICATIONS:
+            if (im->camera) {
+                return false;
+            }
+            msg.type = SC_CONTROL_MSG_TYPE_EXPAND_NOTIFICATION_PANEL;
+            break;
+        case SC_DESKTOP_ANDROID_QUICK_SETTINGS:
+            if (im->camera) {
+                return false;
+            }
+            msg.type = SC_CONTROL_MSG_TYPE_EXPAND_SETTINGS_PANEL;
+            break;
+        case SC_DESKTOP_ANDROID_COLLAPSE_PANELS:
+            if (im->camera) {
+                return false;
+            }
+            msg.type = SC_CONTROL_MSG_TYPE_COLLAPSE_PANELS;
+            break;
+        case SC_DESKTOP_ANDROID_ROTATE_DEVICE:
+            if (im->camera) {
+                return false;
+            }
+            msg.type = SC_CONTROL_MSG_TYPE_ROTATE_DEVICE;
+            break;
+        case SC_DESKTOP_ANDROID_RESET_VIDEO:
+            msg.type = SC_CONTROL_MSG_TYPE_RESET_VIDEO;
+            break;
+        default:
+            return false;
+    }
+
+    if (!sc_controller_push_msg(im->controller, &msg)) {
+        LOGW("Could not queue DroidCast Android action");
+        return false;
+    }
+    return true;
+}
+
+bool
 sc_input_manager_camera_set_torch(struct sc_input_manager *im, bool on) {
     assert(im->controller && im->camera);
 
