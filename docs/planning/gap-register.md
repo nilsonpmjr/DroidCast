@@ -67,6 +67,11 @@ Android listed a value.
   not “camera hardware confirmed the change.”
 - **Cross-platform bridge:** exercise stdin commands and shutdown on Windows; validate
   the app bundle and pipe behavior on macOS.
+- **Host branding:** confirm Desktop/Laptop selection on Windows hardware and both
+  iMac/MacBook macOS hosts. Linux laptop selection and fallback were reviewed locally.
+- **Build toolchain:** GCC 16.2 crashes internally at `-O2`/`-O3`; Release C++
+  compilation is capped at `-O1` for GCC 16+. Re-test future GCC releases and remove the workaround
+  once the compiler completes the same build reliably.
 - **Recording:** open and play finalized MKV/MP4 outputs after normal stop, unplug and
   forced-stop cases.
 

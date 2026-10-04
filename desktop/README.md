@@ -147,7 +147,10 @@ tools, capture library, and grouped controls. The requested blue-gray palette is
 retained: `#171d25` sidebar, `#20252d` workspace, `#edf1f7` text, `#b4c0d0`
 secondary text, `#245bc2` actions and `#91bbff` focus. Native platform title bars,
 vector icons, keyboard-operable switches and constrained content widths keep the
-layout usable across desktop sizes. The original TS project remains untouched.
+layout usable across desktop sizes. The welcome state uses the supplied DroidCast
+artwork: the iMac variant for desktop hosts and the MacBook variant when a laptop
+can be identified from host power/model information. Unknown form factors safely
+fall back to Desktop. The original TS project remains untouched.
 
 Next: validate display, virtual-display and camera sessions with physical devices;
 expand the private engine bridge with more Android control-channel actions;

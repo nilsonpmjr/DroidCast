@@ -1,7 +1,62 @@
 #include "ui.h"
 #include <QApplication>
+#include <QDir>
+#include <QFile>
+#include <QImage>
 #include <QPainter>
 #include <QPalette>
+#ifdef Q_OS_WIN
+#include <windows.h>
+#elif defined(Q_OS_MACOS)
+#include <sys/sysctl.h>
+#endif
+
+namespace {
+bool laptopHost() {
+#ifdef Q_OS_WIN
+  SYSTEM_POWER_STATUS status;
+  return GetSystemPowerStatus(&status) && status.BatteryFlag != 128;
+#elif defined(Q_OS_MACOS)
+  size_t size = 0;
+  if (sysctlbyname("hw.model", nullptr, &size, nullptr, 0) || !size)
+    return false;
+  QByteArray model(static_cast<qsizetype>(size), '\0');
+  return !sysctlbyname("hw.model", model.data(), &size, nullptr, 0) &&
+         model.startsWith("MacBook");
+#elif defined(Q_OS_LINUX)
+  const QDir supplies("/sys/class/power_supply");
+  for (const auto &entry :
+       supplies.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+    QFile type(supplies.filePath(entry + "/type"));
+    if (type.open(QIODevice::ReadOnly) && type.readAll().trimmed() == "Battery")
+      return true;
+  }
+#endif
+  return false;
+}
+
+QPixmap croppedArtwork(const QString &resource) {
+  QImage image(resource);
+  if (image.isNull())
+    return {};
+  image = image.convertToFormat(QImage::Format_RGBA8888);
+  int left = image.width(), top = image.height(), right = -1, bottom = -1;
+  for (int y = 0; y < image.height(); ++y) {
+    const auto *line = image.constScanLine(y);
+    for (int x = 0; x < image.width(); ++x) {
+      if (line[x * 4 + 3] < 8)
+        continue;
+      left = qMin(left, x);
+      right = qMax(right, x);
+      top = qMin(top, y);
+      bottom = qMax(bottom, y);
+    }
+  }
+  return right >= left ? QPixmap::fromImage(image.copy(
+                             left, top, right - left + 1, bottom - top + 1))
+                       : QPixmap{};
+}
+} // namespace
 
 QSize PreferenceSwitch::sizeHint() const {
   return QSize(fontMetrics().horizontalAdvance(text()) + 58,
@@ -89,35 +144,25 @@ QIcon appIcon(const QString &name, const QColor &color) {
   return QIcon(pix);
 }
 ConnectionArt::ConnectionArt(QWidget *parent) : QWidget(parent) {
+  const bool laptop = laptopHost();
+  artwork = croppedArtwork(laptop ? ":/branding/laptop.png"
+                                  : ":/branding/desktop.png");
   setMinimumSize(240, 160);
-  setMaximumHeight(200);
-  setAccessibleName("Connect an Android phone to your desktop");
+  setMaximumHeight(220);
+  setAccessibleName(laptop ? "DroidCast laptop artwork"
+                           : "DroidCast desktop artwork");
 }
 void ConnectionArt::paintEvent(QPaintEvent *) {
   QPainter p(this);
-  p.setRenderHint(QPainter::Antialiasing);
-  p.translate(width() / 2.0 - 120, height() / 2.0 - 80);
-  p.setPen(QPen(QColor("#546173"), 2));
-  p.setBrush(QColor("#171d25"));
-  p.drawRoundedRect(QRectF(8, 20, 172, 105), 8, 8);
-  p.setPen(Qt::NoPen);
-  p.setBrush(QColor("#243550"));
-  p.drawRoundedRect(QRectF(18, 30, 152, 85), 3, 3);
-  p.setPen(QPen(QColor("#546173"), 2));
-  p.drawLine(94, 126, 94, 142);
-  p.drawLine(58, 144, 130, 144);
-  p.setBrush(QColor("#20252d"));
-  p.setPen(QPen(QColor("#91bbff"), 2));
-  p.drawRoundedRect(QRectF(151, 46, 64, 111), 9, 9);
-  p.drawLine(174, 54, 193, 54);
-  p.drawLine(174, 147, 193, 147);
-  p.setPen(QPen(QColor("#91bbff"), 2, Qt::DashLine));
-  p.drawLine(67, 74, 143, 74);
-  p.setPen(QPen(QColor("#91bbff"), 2));
-  p.drawPolyline(QPolygonF{{132, 66}, {143, 74}, {132, 82}});
-  p.drawEllipse(QPointF(183, 101), 13, 13);
-  p.drawLine(177, 101, 181, 105);
-  p.drawLine(181, 105, 189, 97);
+  p.setRenderHint(QPainter::SmoothPixmapTransform);
+  if (artwork.isNull())
+    return;
+  const auto target =
+      artwork.size().scaled(size() - QSize(16, 16), Qt::KeepAspectRatio);
+  p.drawPixmap(QRect(QPoint((width() - target.width()) / 2,
+                            (height() - target.height()) / 2),
+                     target),
+               artwork);
 }
 void applyTheme(QApplication &app) {
   app.setStyle("Fusion");

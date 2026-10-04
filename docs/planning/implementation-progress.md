@@ -186,3 +186,22 @@ slice; automatic structured selectors and hardware testing remained open.
 
 This further advances ticket 21. Structured capability selectors and physical
 device compatibility testing remain open.
+
+## Part 9: contextual DroidCast artwork
+
+- Added the supplied Desktop and Laptop PNGs to the compiled Qt resources, so
+  packaged builds do not depend on repository-relative files at runtime.
+- Replaced the generic welcome illustration with the contextual DroidCast artwork.
+  Laptop detection uses a real battery on Linux/Windows and a MacBook hardware
+  model on macOS; unknown form factors use the Desktop variant rather than guessing
+  from screen resolution.
+- Crops transparent padding at runtime and scales smoothly within the existing
+  welcome hierarchy. The detailed artwork is intentionally not reduced into a
+  small toolbar/favicon treatment.
+- Preserved the graphite/blue interface palette; teal and green remain contained
+  within the authored logo. Both original 2000×2000 assets remain unchanged.
+- Added a GCC 16 Release-build workaround after its `-O2`/`-O3` RTL combine pass
+  crashed on existing Qt container code. C++ Release targets use `-O1` on GCC 16+ pending
+  an upstream compiler fix; other compilers/configurations are unchanged.
+- Verification covers resource compilation, automated UI tests and visual review
+  at 1240×860. Windows/macOS form-factor detection still needs platform testing.

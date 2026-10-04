@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/branding">
+    <file alias="desktop.png">../assets/DroidCast-Desktop.png</file>
+    <file alias="laptop.png">../assets/DroidCast-Laptop.png</file>
+  </qresource>
+</RCC>

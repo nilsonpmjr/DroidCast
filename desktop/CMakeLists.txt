@@ -3,11 +3,18 @@ project(DroidCastDesktop VERSION 0.2.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+set(CMAKE_AUTORCC ON)
+if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
+   CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 16)
+  # GCC 16.2 currently ICEs in its RTL combine pass on Qt container growth at
+  # -O2/-O3. Keep Release optimized and reproducible until the compiler is fixed.
+  add_compile_options($<$<AND:$<COMPILE_LANGUAGE:CXX>,$<CONFIG:Release>>:-O1>)
+endif()
 find_package(Qt6 6.4 REQUIRED COMPONENTS Widgets)
 add_library(hub-core src/engine.cpp src/engine.h)
 target_link_libraries(hub-core PUBLIC Qt6::Widgets)
 target_include_directories(hub-core PUBLIC src)
-qt_add_executable(droidcast-desktop src/main.cpp src/window.cpp src/window.h src/ui.cpp src/ui.h)
+qt_add_executable(droidcast-desktop src/main.cpp src/window.cpp src/window.h src/ui.cpp src/ui.h resources.qrc)
 target_link_libraries(droidcast-desktop PRIVATE hub-core)
 set_target_properties(droidcast-desktop PROPERTIES WIN32_EXECUTABLE TRUE MACOSX_BUNDLE TRUE
   MACOSX_BUNDLE_BUNDLE_NAME "DroidCast Desktop"
@@ -26,7 +33,7 @@ if(BUILD_TESTING)
   find_package(Qt6 REQUIRED COMPONENTS Test)
   add_executable(fake-tool tests/fake_tool.cpp)
   target_link_libraries(fake-tool PRIVATE Qt6::Gui)
-  add_executable(hub-tests tests/test_hub.cpp src/window.cpp src/window.h src/ui.cpp src/ui.h)
+  add_executable(hub-tests tests/test_hub.cpp src/window.cpp src/window.h src/ui.cpp src/ui.h resources.qrc)
   target_link_libraries(hub-tests PRIVATE hub-core Qt6::Test)
   add_dependencies(hub-tests fake-tool)
   add_test(NAME hub-tests COMMAND hub-tests)

@@ -1,6 +1,7 @@
 #pragma once
 #include <QCheckBox>
 #include <QIcon>
+#include <QPixmap>
 #include <QWidget>
 class QApplication;
 QIcon appIcon(const QString &name, const QColor &color = QColor("#b4c0d0"));
@@ -22,4 +23,7 @@ public:
 
 protected:
   void paintEvent(QPaintEvent *) override;
+
+private:
+  QPixmap artwork;
 };
