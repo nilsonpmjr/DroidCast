@@ -111,6 +111,8 @@ int main(int argc, char **argv) {
       report("first-frame");
       if (mode != "old-bridge") {
         report("window-controls-ready");
+        if (mode != "old-fps-bridge")
+          report("fps-controls-ready");
         if (!args.contains("--video-source=camera") &&
             !args.contains("--no-control") && mode != "old-android-bridge") {
           report("android-controls-ready");
@@ -122,8 +124,8 @@ int main(int argc, char **argv) {
           report("camera-controls-ready");
       }
     });
-  if (mode == "disconnect")
-    QTimer::singleShot(250, &app, [&] {
+  if (mode == "disconnect" || mode == "fps-disconnect")
+    QTimer::singleShot(mode == "fps-disconnect" ? 500 : 250, &app, [&] {
       report("disconnected");
       app.exit(2);
     });
@@ -174,6 +176,18 @@ int main(int argc, char **argv) {
                    .arg(QChar(command), mode == "clipboard-unavailable"
                                             ? "unavailable"
                                             : "handled"));
+      return;
+    }
+    if (QByteArray("Ii").contains(command)) {
+      if (mode != "fps-timeout") {
+        const bool handled = mode != "fps-unavailable";
+        if (handled)
+          report(command == 'I' ? "fps-state:started" : "fps-state:stopped");
+        report(QString("fps-result:%1:%2")
+                   .arg(QChar(command), handled ? "handled" : "unavailable"));
+        if (command == 'I' && handled)
+          report(mode == "fps-zero" ? "fps-sample:0:0" : "fps-sample:58:2");
+      }
       return;
     }
     if (command != 'Q')

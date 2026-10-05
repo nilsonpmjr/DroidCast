@@ -7,6 +7,7 @@
 
 #include "android/input.h"
 #include "android/keycodes.h"
+#include "desktop_bridge.h"
 #include "events.h"
 #include "input_events.h"
 #include "screen.h"
@@ -230,8 +231,12 @@ switch_fps_counter_state(struct sc_input_manager *im) {
     // is no ToCToU issue
     if (sc_fps_counter_is_started(fps_counter)) {
         sc_fps_counter_stop(fps_counter);
+        sc_desktop_bridge_fps_state(false);
     } else {
-        sc_fps_counter_start(fps_counter);
+        bool started = sc_fps_counter_start(fps_counter);
+        if (started) {
+            sc_desktop_bridge_fps_state(true);
+        }
         // Any error is already logged
     }
 }
@@ -1254,6 +1259,7 @@ sc_input_manager_on_device_disconnected(struct sc_input_manager *im) {
     struct sc_fps_counter *fps_counter = &im->screen->fps_counter;
     if (sc_fps_counter_is_started(fps_counter)) {
         sc_fps_counter_stop(fps_counter);
+        sc_desktop_bridge_fps_state(false);
     }
 }
 

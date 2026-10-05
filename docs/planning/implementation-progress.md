@@ -305,3 +305,23 @@ device compatibility testing remain open.
 - Tests cover both bytes, capability/readiness, read-only and camera modes, unavailable
   response, timeout isolation, older engines, accessible UI controls and layout.
   Cross-platform clipboard interoperability remains in release-proof work.
+
+## Part 16: structured rendered-FPS measurement
+
+- Added explicit start/stop commands for scrcpy's existing renderer FPS counter.
+  The desktop consumes token-scoped structured events rather than parsing human log
+  text, and only enables the controls after the first video frame.
+- Added latest rendered-FPS and skipped-frame feedback to the active-session panel.
+  The copy distinguishes this host-rendering measurement from capture limit, display
+  refresh rate and end-to-end latency. State events also reconcile use of scrcpy's
+  native FPS shortcut instead of leaving the desktop buttons stale.
+- Kept measurement host-only, so it works in read-only and camera sessions. It does
+  not require Android's control channel and stops being active when the child exits,
+  disconnects or a new session begins.
+- FPS requests share the existing single in-flight bridge slot. A two-second timeout
+  disables only this family for the current session, while Stop and other healthy
+  command families remain available. Older fork builds never advertise readiness.
+- Tests cover start/stop, zero and rendered/skipped samples, disconnect cleanup,
+  unavailable and timeout outcomes, old engines, read-only and camera sessions,
+  accessible labels and the 920×680 no-horizontal-scroll contract. Real-device
+  comparison with scrcpy's log and cross-platform behavior remain release-proof work.

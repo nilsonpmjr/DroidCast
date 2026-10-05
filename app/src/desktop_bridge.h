@@ -13,5 +13,8 @@ void sc_desktop_bridge_camera_controls_ready(void);
 void sc_desktop_bridge_clipboard_controls_ready(void);
 void sc_desktop_bridge_clipboard_copy_pending(void);
 void sc_desktop_bridge_clipboard_copy_complete(bool success);
+void sc_desktop_bridge_fps_controls_ready(void);
+void sc_desktop_bridge_fps_state(bool started);
+void sc_desktop_bridge_fps_sample(unsigned rendered, unsigned skipped);
 
 #endif

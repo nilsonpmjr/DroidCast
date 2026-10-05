@@ -74,6 +74,9 @@ Windows/macOS build paths have not yet been exercised.
   Explicit clipboard buttons copy the current Android selection or paste the
   computer clipboard through scrcpy's control channel; clipboard contents are
   never included in DroidCast bridge status or diagnostics.
+  Rendered-FPS start/stop controls show structured one-second samples and skipped
+  frames from scrcpy's renderer. They also work in read-only and camera sessions;
+  the value is deliberately not presented as capture FPS, refresh rate or latency.
   Camera sessions reveal contextual torch on/off and relative zoom controls.
   They use scrcpy's Android control channel, so they are unavailable in read-only
   mode and report requests rather than assuming the hardware accepted them.
@@ -161,7 +164,7 @@ artwork: the iMac variant for desktop hosts and the MacBook variant when a lapto
 can be identified from host power/model information. Unknown form factors safely
 fall back to Desktop. The original TS project remains untouched.
 
-Next: validate display, virtual-display, Android actions and camera sessions with
-physical devices; turn inspected display/encoder declarations into guided choices;
-integrate live video into the workspace; add per-device profiles and concurrent
-sessions; then finish standalone platform installers.
+Next: validate display, virtual-display, Android actions, clipboard, measured FPS
+and camera sessions with physical devices; add bounded live app/file actions;
+prototype embedded video before deciding its release scope; add per-device profiles
+and concurrent sessions; then finish standalone platform installers.

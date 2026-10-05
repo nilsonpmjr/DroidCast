@@ -421,6 +421,132 @@ private slots:
     engine.stop();
     QTRY_VERIFY(!engine.running());
   }
+  void fpsMeasurementReportsSamplesAndWorksReadOnly() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.options["no-control"] = true;
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy feedback(&engine, &Engine::fpsControlMessage);
+    QVERIFY(!engine.fpsControlsAvailable());
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.fpsControlsAvailable());
+    engine.fpsAction(Engine::FpsAction::Start);
+    QTRY_VERIFY(feedback.last().first().toString().contains("58 rendered fps"));
+    QVERIFY(engine.fpsMeasuring());
+    QVERIFY(engine.fpsControlsAvailable());
+    engine.fpsAction(Engine::FpsAction::Stop);
+    QTRY_VERIFY(feedback.last().first().toString().contains("stopped"));
+    QVERIFY(!engine.fpsMeasuring());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    engine.preferences.options["no-control"] = false;
+    engine.preferences.options["video-source"] = "camera";
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.fpsControlsAvailable());
+    engine.fpsAction(Engine::FpsAction::Start);
+    QTRY_VERIFY(feedback.last().first().toString().contains("2 skipped"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+    QVERIFY(!engine.fpsMeasuring());
+
+    engine.preferences.options["video-source"] = "display";
+    qputenv("HUB_TEST_MODE", "fps-zero");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.fpsControlsAvailable());
+    engine.fpsAction(Engine::FpsAction::Start);
+    QTRY_VERIFY(feedback.last().first().toString().contains("0 rendered fps"));
+    QVERIFY(!feedback.last().first().toString().contains("skipped"));
+    engine.fpsAction(Engine::FpsAction::Stop);
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    qputenv("HUB_TEST_MODE", "fps-disconnect");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.fpsControlsAvailable());
+    engine.fpsAction(Engine::FpsAction::Start);
+    QTRY_VERIFY(engine.fpsMeasuring());
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Disconnected);
+    QVERIFY(!engine.fpsMeasuring());
+  }
+  void fpsMeasurementHandlesUnavailableTimeoutAndOldEngine() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy feedback(&engine, &Engine::fpsControlMessage);
+
+    qputenv("HUB_TEST_MODE", "fps-unavailable");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.fpsControlsAvailable());
+    engine.fpsAction(Engine::FpsAction::Start);
+    QTRY_VERIFY(engine.fpsControlsAvailable());
+    QVERIFY(feedback.last().first().toString().contains("unavailable"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    qputenv("HUB_TEST_MODE", "fps-timeout");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.fpsControlsAvailable());
+    engine.fpsAction(Engine::FpsAction::Start);
+    QTRY_VERIFY_WITH_TIMEOUT(
+        feedback.last().first().toString().contains("No FPS"), 4000);
+    QVERIFY(!engine.fpsControlsAvailable());
+    QVERIFY(engine.windowControlsAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    qputenv("HUB_TEST_MODE", "old-fps-bridge");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    QVERIFY(engine.windowControlsAvailable());
+    QVERIFY(!engine.fpsControlsAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+  }
+  void fpsControlsAreLabelledAndStateful() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(1);
+    auto *feedback = window.findChild<QLabel *>("fpsControlFeedback");
+    QList<QPushButton *> controls;
+    QPushButton *startMeasurement = nullptr, *stopMeasurement = nullptr;
+    for (auto *button : window.findChildren<QPushButton *>()) {
+      if (!button->property("fpsControl").toBool())
+        continue;
+      controls.append(button);
+      QVERIFY(button->accessibleName().startsWith("Rendered FPS:"));
+      if (button->property("fpsStart").toBool())
+        startMeasurement = button;
+      else
+        stopMeasurement = button;
+    }
+    QCOMPARE(controls.size(), 2);
+    QVERIFY(feedback && startMeasurement && stopMeasurement);
+    QVERIFY(!startMeasurement->isEnabled());
+    auto *start = window.findChild<QPushButton *>("startMirror");
+    QTRY_VERIFY(start->isEnabled());
+    start->click();
+    QTRY_VERIFY(startMeasurement->isEnabled());
+    QVERIFY(!stopMeasurement->isEnabled());
+    startMeasurement->click();
+    QTRY_VERIFY(feedback->text().contains("58 rendered fps"));
+    QVERIFY(!startMeasurement->isEnabled());
+    QVERIFY(stopMeasurement->isEnabled());
+    stopMeasurement->click();
+    QTRY_VERIFY(feedback->text().contains("stopped"));
+    QVERIFY(startMeasurement->isEnabled());
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    window.findChild<QPushButton *>("stopMirror")->click();
+    QTRY_VERIFY(start->isEnabled());
+    bundledPreferences().save(settings);
+  }
   void cameraSessionPanelIsContextualAndActionable() {
     QSettings settings;
     auto prefs = bundledPreferences();

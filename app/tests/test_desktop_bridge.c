@@ -36,9 +36,9 @@ int main(void) {
     sc_desktop_bridge_stop();
 
     sc_desktop_bridge_start();
-    assert(write(pipes[1], "?FWZLRPUTt+-01NSCDVYy", 21) == 21);
-    const char *expected = "FWZLRPUTt+-01NSCDVYy";
-    for (int i = 0; i < 20; ++i) {
+    assert(write(pipes[1], "?FWZLRPUTt+-01NSCDVYyIi", 23) == 23);
+    const char *expected = "FWZLRPUTt+-01NSCDVYyIi";
+    for (int i = 0; i < 22; ++i) {
         assert(SDL_WaitEventTimeout(&event, 1000));
         assert(event.type == SC_EVENT_DESKTOP_WINDOW_COMMAND);
         assert(event.user.code == expected[i]);

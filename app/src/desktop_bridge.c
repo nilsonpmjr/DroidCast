@@ -22,6 +22,7 @@ static bool camera_controls_reported;
 static bool android_controls_reported;
 static bool clipboard_controls_reported;
 static bool clipboard_copy_pending;
+static bool fps_controls_reported;
 
 // Only this timer reads stdin. Bounded non-blocking reads also make shutdown
 // safe when the desktop disappears without sending the quit byte.
@@ -59,7 +60,7 @@ read_commands(void *userdata, SDL_TimerID timer_id, Uint32 interval) {
         return 0;
     }
     for (int i = 0; i < count; ++i) {
-        if (bytes[i] && strchr("FWZLRPUTt+-01NSCDVYy", bytes[i])) {
+        if (bytes[i] && strchr("FWZLRPUTt+-01NSCDVYyIi", bytes[i])) {
             SDL_Event event = {
                 .user = {.type = SC_EVENT_DESKTOP_WINDOW_COMMAND,
                          .code = bytes[i]},
@@ -91,8 +92,30 @@ sc_desktop_bridge_start(void) {
     android_controls_reported = false;
     clipboard_controls_reported = false;
     clipboard_copy_pending = false;
+    fps_controls_reported = false;
     input_timer = SDL_AddTimer(50, read_commands, NULL);
     sc_desktop_bridge_report(input_timer ? "bridge-ready" : "bridge-error");
+}
+
+void
+sc_desktop_bridge_fps_controls_ready(void) {
+    if (!fps_controls_reported) {
+        fps_controls_reported = true;
+        sc_desktop_bridge_report("fps-controls-ready");
+    }
+}
+
+void
+sc_desktop_bridge_fps_state(bool started) {
+    sc_desktop_bridge_report(started ? "fps-state:started"
+                                     : "fps-state:stopped");
+}
+
+void
+sc_desktop_bridge_fps_sample(unsigned rendered, unsigned skipped) {
+    char event[64];
+    snprintf(event, sizeof(event), "fps-sample:%u:%u", rendered, skipped);
+    sc_desktop_bridge_report(event);
 }
 
 void

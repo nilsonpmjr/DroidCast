@@ -23,7 +23,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Session lifecycle | Partial | First-frame state, graceful stop, recording finalization and disconnect/failure states. | Real unplug/reconnect and playable-recording tests on phones. |
 | Device workspace | Partial | USB discovery, wireless pair/connect, screenshots, APK install and selected-device targeting. | Complete pair-to-mirror guidance and broader recovery testing. |
 | Configuration routes | Partial | Searchable Video, Camera, Audio, Device, Window, Keyboard, Mouse, Gamepad, Recording and Virtual display categories. | Connection/Tunnels, Control, OTG, Video4Linux and complete Shortcuts routes. |
-| Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, Android/window rotation, reset video, mirror-window actions and contextual camera controls. | Live app/file actions and measured FPS. |
+| Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, Android/window rotation, reset video, mirror-window actions, rendered-FPS measurement and contextual camera controls. | Live app launch and bounded file push actions. |
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
 | Audio | Partial | Enablement, source, codec and buffers. | Duplication, encoder/bitrate, require-audio, audio-only and playback policies. |
 | Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior and UHID gamepad. | Mouse bindings, shortcut modifier, AOA modes, gesture help and peripheral tests. |
@@ -36,21 +36,24 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
 
-## Next implementation: measured FPS in the workspace
+## Next implementation: launch an inspected app during a live session
 
-The clipboard slice is complete in code. The next bounded toolbar slice should turn
-scrcpy's existing FPS counter into useful workspace feedback instead of leaving its
-measurements only in process output.
+Rendered-FPS measurement is complete in code. The next bounded toolbar slice should
+reuse the target-scoped installed-app inspection without turning arbitrary package
+text into an unreviewed shell command.
 
-1. Add explicit start/stop FPS commands to the bridge without parsing generic logs.
-2. Emit bounded structured samples containing rendered FPS and skipped-frame count.
-3. Show the latest sample and measurement state beside session status; do not confuse
-   rendered FPS with capture limit, display refresh rate or end-to-end latency.
-4. Keep measurement host-only and available in read-only sessions, but unavailable
-   without video playback or before the first frame.
-5. Stop reporting on session end and ignore stale samples from prior session tokens.
-6. Test start/stop, structured samples, zero/skipped frames, old engines, timeout,
-   read-only mode, camera sessions and layout at 920×680.
+1. Expose a searchable live-session app picker only for an authorized display
+   session with Android control available; camera and read-only sessions stay gated.
+2. Send the selected exact package through a typed, length-bounded private bridge
+   message or an equally bounded scrcpy-native path. Do not interpolate shell text.
+3. Target the active Android display explicitly. If scrcpy cannot launch onto a
+   secondary/virtual display safely, leave the action disabled there and explain why.
+4. Report requested, unavailable, timeout and old-engine states without claiming the
+   app reached its foreground activity.
+5. Keep the inspected list target-scoped, clear it on device changes and retain a
+   deliberate refresh path; do not copy package inventories into Diagnostics.
+6. Test malicious/oversize package rejection, selection, serialization with other
+   bridge requests, display targeting, old engines, timeout and the 920×680 layout.
 
 ## Release-proof still required for recent work
 
@@ -65,6 +68,9 @@ measurements only in process output.
 - **Clipboard:** verify copy and paste with empty, Unicode and maximum practical
   content on Android/Linux, Windows and macOS. Automated tests prove command/privacy
   behavior, not platform clipboard interoperability.
+- **Rendered FPS:** compare structured samples with scrcpy's ordinary FPS log on
+  display, read-only and camera sessions; verify skipped-frame reporting under load
+  and clean stop/disconnect behavior on all desktop platforms.
 - **Cross-platform bridge:** exercise stdin commands and shutdown on Windows; validate
   the app bundle and pipe behavior on macOS.
 - **Host branding:** confirm Desktop/Laptop selection on Windows hardware and both

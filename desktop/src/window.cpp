@@ -536,10 +536,38 @@ QWidget *Window::sessionPage() {
           &QLabel::setText);
   connect(&engine, &Engine::windowControlsChanged, this,
           &Window::updateActions);
-  connect(&engine, &Engine::sessionChanged, this, [this, windowFeedback] {
-    if (engine.sessionState() != Engine::SessionState::Streaming)
-      windowFeedback->setText(engine.sessionStateText());
-  });
+  preview->addWidget(label("Rendered FPS", "section"));
+  preview->addWidget(
+      label("Measure frames rendered by the mirror. This is not the configured "
+            "capture limit, display refresh rate or input latency.",
+            "muted"));
+  auto *fpsControls = new QHBoxLayout;
+  for (const auto &entry :
+       {qMakePair(QString("Start measurement"), Engine::FpsAction::Start),
+        qMakePair(QString("Stop measurement"), Engine::FpsAction::Stop)}) {
+    auto *control = button(entry.first);
+    control->setProperty("fpsControl", true);
+    control->setProperty("fpsStart", entry.second == Engine::FpsAction::Start);
+    control->setAccessibleName("Rendered FPS: " + entry.first);
+    control->setMinimumHeight(40);
+    fpsControls->addWidget(control);
+    connect(control, &QPushButton::clicked, this,
+            [this, action = entry.second] { engine.fpsAction(action); });
+  }
+  preview->addLayout(fpsControls);
+  auto *fpsFeedback =
+      label("Start mirroring to measure rendered FPS.", "muted");
+  fpsFeedback->setObjectName("fpsControlFeedback");
+  preview->addWidget(fpsFeedback);
+  connect(&engine, &Engine::fpsControlMessage, fpsFeedback, &QLabel::setText);
+  connect(&engine, &Engine::fpsControlsChanged, this, &Window::updateActions);
+  connect(&engine, &Engine::sessionChanged, this,
+          [this, windowFeedback, fpsFeedback] {
+            if (engine.sessionState() != Engine::SessionState::Streaming) {
+              windowFeedback->setText(engine.sessionStateText());
+              fpsFeedback->setText("Start mirroring to measure rendered FPS.");
+            }
+          });
   preview->addStretch();
   columns->addWidget(previewCard, 3);
   auto *controls = new QVBoxLayout;
@@ -1579,6 +1607,10 @@ void Window::updateActions() {
       control->setEnabled(engine.clipboardControlsAvailable());
     else if (control->property("windowControl").toBool())
       control->setEnabled(engine.windowControlsAvailable());
+    else if (control->property("fpsControl").toBool())
+      control->setEnabled(
+          engine.fpsControlsAvailable() &&
+          (control->property("fpsStart").toBool() != engine.fpsMeasuring()));
     else if (control->property("inspectDevice").toBool())
       control->setEnabled(ready && !running && !engine.deviceBusy());
     else if (control->property("cancelInspection").toBool())

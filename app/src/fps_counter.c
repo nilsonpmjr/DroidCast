@@ -1,4 +1,5 @@
 #include "fps_counter.h"
+#include "desktop_bridge.h"
 
 #include <assert.h>
 #include <stdint.h>
@@ -54,6 +55,7 @@ display_fps(struct sc_fps_counter *counter) {
     } else {
         LOGI("%u fps", rendered_per_second);
     }
+    sc_desktop_bridge_fps_sample(rendered_per_second, counter->nr_skipped);
 }
 
 // must be called with mutex locked
@@ -113,6 +115,7 @@ sc_fps_counter_start(struct sc_fps_counter *counter) {
                                    "scrcpy-fps", counter);
         if (!ok) {
             LOGE("Could not start FPS counter thread");
+            set_started(counter, false);
             return false;
         }
 

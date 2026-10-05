@@ -122,6 +122,10 @@ public:
   enum class ClipboardAction { CopyFromAndroid, PasteToAndroid };
   void clipboardAction(ClipboardAction action);
   bool clipboardControlsAvailable() const;
+  enum class FpsAction { Start, Stop };
+  void fpsAction(FpsAction action);
+  bool fpsControlsAvailable() const;
+  bool fpsMeasuring() const { return fpsMeasurementActive; }
   enum class SessionState {
     Idle,
     Starting,
@@ -159,6 +163,8 @@ signals:
   void androidControlMessage(const QString &text);
   void clipboardControlsChanged();
   void clipboardControlMessage(const QString &text);
+  void fpsControlsChanged();
+  void fpsControlMessage(const QString &text);
   void captureSaved(const QString &path);
   void message(const QString &text);
   void log(const QString &text);
@@ -188,6 +194,8 @@ private:
   bool cameraCommandsReady = false, cameraCommandsHealthy = true;
   bool androidCommandsReady = false, androidCommandsHealthy = true;
   bool clipboardCommandsReady = false, clipboardCommandsHealthy = true;
+  bool fpsCommandsReady = false, fpsCommandsHealthy = true,
+       fpsMeasurementActive = false;
   char pendingBridgeCommand = 0;
   void readMirrorOutput();
   QByteArray scanOutput, wirelessOutput, pairingInput;

@@ -6,8 +6,8 @@ their normal stdin behavior. The desktop generates a new token per launch.
 
 - Parent → child stdin: the byte `Q` requests an SDL quit event. EOF does the same.
   This follows scrcpy's normal window-close cleanup, including joining the recorder.
-- After the matching readiness event, the parent can send window or camera
-  commands below. They are whitelisted bytes delivered to the SDL thread, not
+- After the matching readiness event, the parent can send the commands below.
+  They are whitelisted bytes delivered to the SDL thread, not
   shell commands or synthesized keyboard shortcuts. Unknown bytes are ignored;
   `Q` takes priority.
 - Child → parent stdout: `DROIDCAST/1 <token> <event>\n`.
@@ -21,6 +21,10 @@ their normal stdin behavior. The desktop generates a new token per launch.
   `clipboard-result:<byte>:handled` / `clipboard-result:<byte>:unavailable`.
 - Camera events: `camera-controls-ready` and
   `camera-result:<byte>:handled` / `camera-result:<byte>:unavailable`.
+- FPS events: `fps-controls-ready`,
+  `fps-result:<byte>:handled` / `fps-result:<byte>:unavailable`, and
+  `fps-state:started` / `fps-state:stopped`, and
+  `fps-sample:<rendered>:<skipped>`.
 - `first-frame` is emitted once, after uploading and rendering a video frame.
   Starting a process alone is not evidence of video readiness.
 - Recording status comes from the recorder callback after trailer/output close;
@@ -55,6 +59,20 @@ their normal stdin behavior. The desktop generates a new token per launch.
 | `T` / `t` | Request torch on / off |
 | `+` / `-` | Request relative zoom in / out |
 
+| Byte | Rendered-FPS action |
+| --- | --- |
+| `I` | Start measuring frames rendered by the mirror |
+| `i` | Stop measuring rendered frames |
+
+FPS measurement is a host-side video capability advertised after the first frame.
+It works for display and camera streams, including read-only sessions, because it
+does not send control messages to Android. Each structured sample contains the
+frames rendered during the interval and the frames skipped by the renderer. It is
+not the configured capture limit, display refresh rate or end-to-end latency.
+Samples stop when measurement or the session stops and retain the session token,
+so the desktop rejects stale or unrelated output. State events also keep the
+desktop synchronized when the native scrcpy FPS shortcut is used in the mirror.
+
 Camera commands are advertised only for a camera stream and require the Android
 control channel. A handled result confirms that the request entered that channel;
 the camera HAL may still reject unsupported torch or zoom behavior. Zoom is
@@ -85,11 +103,12 @@ the window manager honored the requested geometry/fullscreen state. The desktop
 does not maintain optimistic fullscreen or paused toggle state, so keyboard
 shortcuts in the mirror cannot leave a stale toggle in the desktop UI.
 
-Only one bridge command can be outstanding across all four families. After two
+Only one bridge command can be outstanding across all five families. After two
 seconds without a matching response, the desktop disables that command family
 until a new session starts. It never retries toggles automatically, and late
 replies cannot complete a later command in the same session. A camera or Android
-timeout does not disable window controls, and Stop remains available independently.
+timeout does not disable window or FPS controls, and Stop remains available
+independently.
 
 The desktop gives normal cleanup five seconds, then kills an unresponsive child
 and preserves an incomplete-recording warning. Killing the parent or a machine

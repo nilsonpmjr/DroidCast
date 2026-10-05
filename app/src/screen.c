@@ -766,7 +766,9 @@ sc_screen_show_initial_window(struct sc_screen *screen) {
     }
 
     if (screen->req.start_fps_counter) {
-        sc_fps_counter_start(&screen->fps_counter);
+        if (sc_fps_counter_start(&screen->fps_counter)) {
+            sc_desktop_bridge_fps_state(true);
+        }
     }
 
     screen->window_shown = true;
@@ -953,6 +955,7 @@ sc_screen_apply_frame(struct sc_screen *screen, bool can_resize) {
 
     sc_screen_render(screen, false);
     sc_desktop_bridge_first_frame();
+    sc_desktop_bridge_fps_controls_ready();
     if (screen->controller && !screen->camera) {
         sc_desktop_bridge_android_controls_ready();
         if (screen->im.kp) {
@@ -1146,6 +1149,28 @@ sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
     switch (event->type) {
         case SC_EVENT_DESKTOP_WINDOW_COMMAND: {
             char command = (char) event->user.code;
+            bool fps_command = command == 'I' || command == 'i';
+            if (fps_command) {
+                bool available = screen->video && screen->window_shown
+                              && !screen->disconnected;
+                bool handled = available;
+                if (available) {
+                    if (command == 'I') {
+                        handled = sc_fps_counter_start(&screen->fps_counter);
+                        if (handled) {
+                            sc_desktop_bridge_fps_state(true);
+                        }
+                    } else {
+                        sc_fps_counter_stop(&screen->fps_counter);
+                        sc_desktop_bridge_fps_state(false);
+                    }
+                }
+                char result[64];
+                snprintf(result, sizeof(result), "fps-result:%c:%s", command,
+                         handled ? "handled" : "unavailable");
+                sc_desktop_bridge_report(result);
+                return;
+            }
             bool clipboard_command = command == 'Y' || command == 'y';
             if (clipboard_command) {
                 bool available = screen->controller && screen->im.kp

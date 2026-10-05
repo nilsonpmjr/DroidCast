@@ -899,6 +899,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
         QByteArray("01NSCDV").contains(pendingBridgeCommand);
     const bool clipboardCommand =
         QByteArray("Yy").contains(pendingBridgeCommand);
+    const bool fpsCommand = QByteArray("Ii").contains(pendingBridgeCommand);
     pendingBridgeCommand = 0;
     if (cameraCommand) {
       cameraCommandsHealthy = false;
@@ -915,6 +916,12 @@ Engine::Engine(QObject *parent) : QObject(parent) {
       emit clipboardControlMessage(
           "No clipboard confirmation arrived. Restart the session to "
           "re-enable clipboard actions; no request was retried.");
+    } else if (fpsCommand) {
+      fpsCommandsHealthy = false;
+      fpsMeasurementActive = false;
+      emit fpsControlMessage(
+          "No FPS confirmation arrived. Restart the session to re-enable "
+          "measurement controls; no request was retried.");
     } else {
       windowCommandsHealthy = false;
       emit windowControlMessage(
@@ -925,6 +932,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
     emit cameraControlsChanged();
     emit androidControlsChanged();
     emit clipboardControlsChanged();
+    emit fpsControlsChanged();
   });
   scanTimeout.setSingleShot(true);
   wirelessTimeout.setSingleShot(true);
@@ -1007,6 +1015,9 @@ Engine::Engine(QObject *parent) : QObject(parent) {
             bridgeCommandTimeout.stop();
             pendingBridgeCommand = 0;
             readMirrorOutput();
+            // Buffered acknowledgements cannot leave a completed session marked
+            // as measuring after readMirrorOutput() processes its final lines.
+            fpsMeasurementActive = false;
             const bool clean = code == 0 && status == QProcess::NormalExit &&
                                !forcedStop && !recordingFailed;
             const bool recording = !activeRecording.isEmpty();
@@ -1034,6 +1045,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
                   recording ? "Recording finalized. Session ended."
                             : "Session ended. You can start another mirror.");
             stopping = false;
+            emit fpsControlsChanged();
             emit sessionChanged();
           });
   wireless.setProcessChannelMode(QProcess::MergedChannels);
@@ -1274,6 +1286,9 @@ bool Engine::start(const QString &serial, const QString &recording) {
   androidCommandsHealthy = true;
   clipboardCommandsReady = false;
   clipboardCommandsHealthy = true;
+  fpsCommandsReady = false;
+  fpsCommandsHealthy = true;
+  fpsMeasurementActive = false;
   pendingBridgeCommand = 0;
   emit windowControlMessage(
       "Window controls become available after the first video frame.");
@@ -1292,6 +1307,8 @@ bool Engine::start(const QString &serial, const QString &recording) {
       : activeReadOnly
           ? "Clipboard actions are disabled in read-only mode."
           : "Clipboard actions become available after the first frame.");
+  emit fpsControlMessage(
+      "Rendered FPS measurement becomes available after the first frame.");
   forcedStop = bridgeReady = recordingFinalized = recordingFailed = false;
   mirrorOutput.clear();
   sessionToken = QUuid::createUuid().toString(QUuid::Id128).toLatin1();
@@ -1311,6 +1328,8 @@ void Engine::stop() {
   stopping = true;
   bridgeCommandTimeout.stop();
   pendingBridgeCommand = 0;
+  fpsMeasurementActive = false;
+  emit fpsControlsChanged();
   state = SessionState::Stopping;
   emit message("Stopping session and finishing any recording…");
   // The fork handles this on its SDL event loop, following window-close
@@ -1367,6 +1386,19 @@ void Engine::readMirrorOutput() {
                                       "changes the Android virtual display."
                                     : "Window controls ready. These actions "
                                       "affect the computer display only.");
+    } else if (event == "fps-controls-ready" && bridgeReady) {
+      fpsCommandsReady = true;
+      emit fpsControlMessage(
+          "Rendered FPS measurement ready. This is not latency or the "
+          "configured capture limit.");
+      emit fpsControlsChanged();
+    } else if ((event == "fps-state:started" || event == "fps-state:stopped") &&
+               bridgeReady) {
+      fpsMeasurementActive = event.endsWith(":started");
+      emit fpsControlMessage(fpsMeasurementActive
+                                 ? "Measuring rendered FPS…"
+                                 : "Rendered FPS measurement stopped.");
+      emit fpsControlsChanged();
     } else if (event == "android-controls-ready" && bridgeReady &&
                !activeCamera) {
       androidCommandsReady = true;
@@ -1415,6 +1447,7 @@ void Engine::readMirrorOutput() {
         emit cameraControlsChanged();
         emit androidControlsChanged();
         emit clipboardControlsChanged();
+        emit fpsControlsChanged();
       }
     } else if (event.startsWith("camera-result:") && bridgeReady &&
                pendingBridgeCommand) {
@@ -1437,6 +1470,7 @@ void Engine::readMirrorOutput() {
         emit windowControlsChanged();
         emit androidControlsChanged();
         emit clipboardControlsChanged();
+        emit fpsControlsChanged();
       }
     } else if (event.startsWith("android-result:") && bridgeReady &&
                pendingBridgeCommand) {
@@ -1481,6 +1515,7 @@ void Engine::readMirrorOutput() {
         emit windowControlsChanged();
         emit cameraControlsChanged();
         emit clipboardControlsChanged();
+        emit fpsControlsChanged();
       }
     } else if (event.startsWith("clipboard-result:") && bridgeReady &&
                pendingBridgeCommand) {
@@ -1502,6 +1537,41 @@ void Engine::readMirrorOutput() {
         emit windowControlsChanged();
         emit cameraControlsChanged();
         emit androidControlsChanged();
+        emit fpsControlsChanged();
+      }
+    } else if (event.startsWith("fps-result:") && bridgeReady &&
+               pendingBridgeCommand) {
+      const QByteArray expected =
+          QByteArray("fps-result:") + pendingBridgeCommand + ':';
+      if (event == expected + "handled" || event == expected + "unavailable") {
+        bridgeCommandTimeout.stop();
+        const bool handled = event.endsWith(":handled");
+        const char command = pendingBridgeCommand;
+        pendingBridgeCommand = 0;
+        if (handled)
+          fpsMeasurementActive = command == 'I';
+        emit fpsControlMessage(
+            !handled ? "FPS measurement is unavailable for this session."
+            : command == 'I' ? "Measuring rendered FPS…"
+                             : "Rendered FPS measurement stopped.");
+        emit fpsControlsChanged();
+        emit windowControlsChanged();
+        emit cameraControlsChanged();
+        emit androidControlsChanged();
+        emit clipboardControlsChanged();
+      }
+    } else if (event.startsWith("fps-sample:") && bridgeReady &&
+               fpsMeasurementActive) {
+      static const QRegularExpression samplePattern(
+          "\\Afps-sample:([0-9]{1,6}):([0-9]{1,9})\\z");
+      const auto sample = samplePattern.match(QString::fromLatin1(event));
+      if (sample.hasMatch()) {
+        const auto rendered = sample.captured(1);
+        const auto skipped = sample.captured(2).toUInt();
+        emit fpsControlMessage(
+            rendered + " rendered fps" +
+            (skipped ? " · " + QString::number(skipped) + " skipped frame(s)"
+                     : QString{}));
       }
     } else if (event == "recording-finalized" && bridgeReady)
       recordingFinalized = true;
@@ -1570,6 +1640,7 @@ void Engine::windowAction(WindowAction action) {
   emit cameraControlsChanged();
   emit androidControlsChanged();
   emit clipboardControlsChanged();
+  emit fpsControlsChanged();
 }
 
 bool Engine::cameraControlsAvailable() const {
@@ -1618,6 +1689,7 @@ void Engine::cameraAction(CameraAction action) {
   emit windowControlsChanged();
   emit androidControlsChanged();
   emit clipboardControlsChanged();
+  emit fpsControlsChanged();
 }
 
 bool Engine::androidControlsAvailable() const {
@@ -1677,6 +1749,7 @@ void Engine::androidAction(AndroidAction action) {
   emit windowControlsChanged();
   emit cameraControlsChanged();
   emit clipboardControlsChanged();
+  emit fpsControlsChanged();
 }
 
 bool Engine::clipboardControlsAvailable() const {
@@ -1713,6 +1786,37 @@ void Engine::clipboardAction(ClipboardAction action) {
   emit windowControlsChanged();
   emit cameraControlsChanged();
   emit androidControlsChanged();
+  emit fpsControlsChanged();
+}
+
+bool Engine::fpsControlsAvailable() const {
+  return running() && state == SessionState::Streaming && fpsCommandsReady &&
+         fpsCommandsHealthy && !pendingBridgeCommand;
+}
+
+void Engine::fpsAction(FpsAction action) {
+  if (!fpsControlsAvailable()) {
+    emit fpsControlMessage(
+        "FPS measurement is waiting for video or another bridge request.");
+    return;
+  }
+  const char command = action == FpsAction::Start ? 'I' : 'i';
+  pendingBridgeCommand = command;
+  if (mirror.write(&command, 1) != 1) {
+    pendingBridgeCommand = 0;
+    fpsCommandsHealthy = false;
+    fpsMeasurementActive = false;
+    emit fpsControlMessage(
+        "Could not send the FPS request. Restart the session.");
+  } else {
+    bridgeCommandTimeout.start(2000);
+    emit fpsControlMessage("Waiting for the mirror to update FPS measurement…");
+  }
+  emit fpsControlsChanged();
+  emit windowControlsChanged();
+  emit cameraControlsChanged();
+  emit androidControlsChanged();
+  emit clipboardControlsChanged();
 }
 
 void Engine::connectWireless(const QString &endpoint, const QString &code) {
