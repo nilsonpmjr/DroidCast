@@ -25,35 +25,37 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Configuration routes | Partial | Searchable Video, Camera, Audio, Device, Window, Keyboard, Mouse, Gamepad, Recording and Virtual display categories. | Connection/Tunnels, Control, OTG, Video4Linux and complete Shortcuts routes. |
 | Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, inspected-app launch, one-file transfer, Android/window rotation, reset video, mirror-window actions, rendered-FPS measurement and contextual camera controls. | Decide whether multi-file drag/drop and transfer progress belong in release scope. |
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
-| Audio | Partial | Enablement, all capture sources, Android playback duplication, codec-matched inspected/manual encoder, bitrate, require-audio, host playback/buffers and real first-packet-backed audio-only sessions. | Dedicated audio recording formats and physical-device proof. |
+| Audio | Partial | Enablement, all capture sources, Android playback duplication, codec-matched inspected/manual encoder, bitrate, require-audio, host playback/buffers, first-packet-backed audio-only sessions and codec-safe dedicated recording formats. | Physical-device output and playable-file proof. |
 | Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior and UHID gamepad. | Mouse bindings, shortcut modifier, AOA modes, gesture help and peripheral tests. |
 | Virtual display | Partial | Creation, size/DPI, flex, searchable inspected-app picker, manual package fallback, IME, decorations and close policy. | Android 10+ hardware journeys. |
 | Camera | Partial | Source, ID/facing, guided declared size/FPS/high-speed choices, manual fallback, startup torch/zoom and live torch/zoom. | Android-version/capability gates and real camera tests. |
-| Recording | Partial | MKV/MP4 video or audio-only sessions, no-playback recording, unique paths and graceful finalization state. | Audio-specific formats plus playback verification of real files. |
+| Recording | Partial | Mode-specific MKV/MP4/MKA/M4A/OPUS/AAC/FLAC/WAV, codec validation, migration, unique paths, filters and graceful finalization state. | Playback verification of real files after normal and abnormal endings. |
 | Embedded video | Open decision | The engine opens a separate native mirror window. | Decide release scope; prototype a real frame inside Qt before promising it. |
 | OTG | Open | Nothing end to end. | USB discovery without ADB, control-only session model, drivers and hardware tests. |
 | Remote tunnels | Open | Ordinary wireless ADB pairing/connection only. | Consistent remote socket/tunnel configuration across every ADB operation. |
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
 
-## Next implementation: audio-specific recording formats
+## Next implementation: coherent Connection and Tunnels route
 
-Audio-only is now a real lifecycle mode, but its recording picker deliberately remains
-on the existing MKV/MP4 path. The next bounded slice completes the file contract.
+Wireless pairing/connection exists, but advanced remote ADB and scrcpy tunnel settings
+do not. They must share one transport policy rather than partially routing operations.
 
-1. Offer M4A, MKA, OPUS, AAC, FLAC and WAV only during audio-only recording; keep
-   video sessions on MKV/MP4.
-2. Derive codec compatibility from the fork contract: OPUS, AAC, FLAC and WAV require
-   their matching codecs; M4A accepts supported encoded audio but rejects raw; and
-   MKA/MKV follow the muxer's supported streams. Keep MKV as the flexible fallback.
-3. Generate the extension and `--record-format` from one typed selection so the
-   capture library and engine can never disagree about the file.
-4. Give audio recordings a distinct library icon/filter while keeping active-file
-   protection and graceful finalization unchanged.
-5. Test every compatible and rejected codec/container pair, migration from saved
-   MKV/MP4 preferences, unique names and the 920×680 layout contract.
-6. Hardware-play every resulting format after normal stop, unplug and no-host-playback
-   recording before marking recording complete.
+1. Add a Connection route for local versus remote ADB server, with a validated TCP
+   `ADB_SERVER_SOCKET` host/port and an explicit warning that raw remote ADB is
+   unencrypted. SSH setup remains user-managed; DroidCast must not compose a shell.
+2. Apply the selected ADB server environment consistently to discovery, pairing,
+   connect, inspection, screenshots, APK install, file transfer, phone actions and
+   the scrcpy child. Never let the device list and session target different servers.
+3. Add validated scrcpy tunnel host/port plus automatic/reverse/forced-forward policy.
+   Explain when an SSH `-L`/`-R` topology needs each mode and retain upstream defaults
+   when fields are empty.
+4. Persist endpoints and policy, but no pairing code, SSH credential or secret. Make
+   local mode a one-action recovery path from an unreachable remote server.
+5. Test direct argument/environment boundaries, IPv4/hostname/bracketed IPv6 parsing,
+   malformed ports, every subprocess route, timeout recovery and 920×680 layout.
+6. Verify local ADB, a remote ADB server and both SSH tunnel topologies on at least two
+   desktop platforms before calling the route complete.
 
 ## Release-proof still required for recent work
 
@@ -93,8 +95,8 @@ on the existing MKV/MP4 path. The next bounded slice completes the file contract
 - **Build toolchain:** GCC 16.2 crashes internally at `-O2`/`-O3`; Release C++
   compilation is capped at `-O1` for GCC 16+. Re-test future GCC releases and remove the workaround
   once the compiler completes the same build reliably.
-- **Recording:** open and play finalized MKV/MP4 outputs after normal stop, unplug and
-  forced-stop cases.
+- **Recording:** open and play finalized MKV/MP4 video plus every supported dedicated
+  audio format after normal stop, unplug, playback-disabled capture and forced stop.
 
 ## How future work updates this file
 

@@ -838,7 +838,9 @@ QWidget *Window::capturesPage() {
                       layout);
   auto *actions = new QHBoxLayout;
   captureFilter = new QComboBox;
-  captureFilter->addItems({"All captures", "Videos", "Screenshots"});
+  captureFilter->setObjectName("captureFilter");
+  captureFilter->addItems(
+      {"All captures", "Videos", "Audio recordings", "Screenshots"});
   captureFilter->setAccessibleName("Filter captures");
   actions->addWidget(captureFilter);
   actions->addStretch();
@@ -859,6 +861,7 @@ QWidget *Window::capturesPage() {
   captureDirectory = label(engine.preferences.mediaDirectory, "muted");
   layout->addWidget(captureDirectory);
   captureList = new QListWidget;
+  captureList->setObjectName("captureList");
   captureList->setAccessibleName("Saved recordings and screenshots");
   captureList->setMinimumHeight(260);
   layout->addWidget(captureList, 1);
@@ -2031,17 +2034,29 @@ void Window::updateCaptures() {
           : QString{};
   captureList->clear();
   captureDirectory->setText(engine.preferences.mediaDirectory);
-  const QStringList filters = captureFilter->currentIndex() == 1
-                                  ? QStringList{"*.mkv", "*.mp4"}
-                              : captureFilter->currentIndex() == 2
-                                  ? QStringList{"*.png"}
-                                  : QStringList{"*.mkv", "*.mp4", "*.png"};
+  const QStringList videoFilters{"*.mkv", "*.mp4"};
+  const QStringList audioFilters{"*.mka", "*.m4a", "*.opus", "*.aac",
+                                 "*.flac", "*.wav"};
+  QStringList filters;
+  if (captureFilter->currentIndex() == 1)
+    filters = videoFilters;
+  else if (captureFilter->currentIndex() == 2)
+    filters = audioFilters;
+  else if (captureFilter->currentIndex() == 3)
+    filters = {"*.png"};
+  else
+    filters = videoFilters + audioFilters + QStringList{"*.png"};
   const auto files = QDir(engine.preferences.mediaDirectory)
                          .entryInfoList(filters, QDir::Files, QDir::Time);
   for (const auto &file : files) {
     const bool recording = file.absoluteFilePath() == engine.activeRecording;
+    const auto suffix = file.suffix().toLower();
+    const bool audioRecording =
+        QStringList{"mka", "m4a", "opus", "aac", "flac", "wav"}.contains(
+            suffix);
     auto *item = new QListWidgetItem(
-        appIcon(file.suffix() == "png" ? "capture" : "video"),
+        appIcon(suffix == "png" ? "capture"
+                                : audioRecording ? "audio" : "video"),
         file.fileName() + "\n" +
             file.lastModified().toString("dd MMM yyyy, HH:mm") + "   ·   " +
             QString::number(file.size() / 1024.0 / 1024.0, 'f', 2) + " MB" +

@@ -412,3 +412,22 @@ device compatibility testing remain open.
   UI context and 920×680 layout coverage. MKV/MP4 remain the explicit recording
   choices; audio-specific formats and physical-device/audio-output proof stay in the
   gap register.
+
+## Part 21: codec-safe audio recording formats
+
+- Split video and audio-only recording preferences so changing session mode cannot
+  leave a video-only container selected or discard the user's other mode choice.
+  Existing MKV/MP4 settings migrate into the audio preference once, then both persist.
+- Added MKA, M4A, OPUS, AAC, FLAC and WAV for audio-only recording while retaining
+  MKV/MP4 for display, virtual-display and camera sessions. The generated extension
+  and explicit `--record-format` come from the same normalized preference.
+- Enforced the fork's container boundary before launch: OPUS/AAC/FLAC/WAV require
+  their matching codec, MP4/M4A reject raw audio, and MKA/MKV remain the flexible
+  muxer-backed choices. Recording rotation stays unavailable without video.
+- Added a dedicated audio icon and Audio recordings library filter without weakening
+  active-file protection or finalization behavior. Audio-only MKV/MP4 remain visible
+  with the generic recording filter because their extension does not reveal contents.
+- Tests cover every exact-codec container, mismatches, M4A/raw rejection, MKA/raw,
+  video-mode isolation, versioned migration, persistence, widget dependencies,
+  extension filtering and the 920×680 layout contract. Real file playback remains
+  release-proof work.

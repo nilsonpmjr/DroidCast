@@ -199,11 +199,19 @@ const QList<SessionOption> &sessionOptions() {
        {"disabled", "uhid"}},
       {"record-format",
        "Recording",
-       "Recording container",
+       "Video recording container",
        "MKV is flexible; MP4 is widely supported. MP4 cannot contain raw "
-       "audio. Applies only when recording.",
+       "audio. Applies to display, virtual-display and camera recording.",
        "mkv",
        {"mkv", "mp4"}},
+      {"audio-record-format",
+       "Recording",
+       "Audio-only recording container",
+       "MKA is the flexible audio default. Dedicated OPUS, AAC, FLAC and WAV "
+       "files require the matching audio codec. Applies only in Audio-only "
+       "mode.",
+       "mka",
+       {"mka", "m4a", "opus", "aac", "flac", "wav", "mkv", "mp4"}},
       {"record-orientation",
        "Recording",
        "Recording rotation",
@@ -369,6 +377,10 @@ bool sessionOptionAvailable(const SessionOption &option, const Preferences &p) {
     return p.audio;
   if (audioOnly && option.category != "Audio" && option.category != "Recording")
     return false;
+  if (option.key == "record-format")
+    return !audioOnly;
+  if (option.key == "audio-record-format")
+    return audioOnly;
   if (audioOnly && option.key == "record-orientation")
     return false;
   if (option.key == "video-source")
@@ -415,7 +427,16 @@ bool sessionOptionAvailable(const SessionOption &option, const Preferences &p) {
 }
 
 QString recordingFormat(const Preferences &p) {
-  return p.options.value("record-format").toString() == "mp4" ? "mp4" : "mkv";
+  const bool audioOnly = p.options.value("audio-only", false).toBool();
+  const QString key = audioOnly ? "audio-record-format" : "record-format";
+  const QString fallback = audioOnly ? "mka" : "mkv";
+  const QString format = p.options.value(key, fallback).toString();
+  const QStringList allowed =
+      audioOnly
+          ? QStringList{"mka", "m4a", "opus", "aac", "flac", "wav", "mkv",
+                        "mp4"}
+          : QStringList{"mkv", "mp4"};
+  return allowed.contains(format) ? format : fallback;
 }
 
 QVariant normalizedOption(const SessionOption &option, const QVariant &value) {
@@ -561,10 +582,26 @@ PreferenceIssue sessionIssue(const Preferences &p, bool recording) {
       p.options.value("audio-source", "auto").toString() != "playback")
     return {"audio-source",
             "Keeping audio on Android requires the playback audio source."};
-  if (recording && recordingFormat(p) == "mp4" && p.audio &&
+  if (recording && !audioOnly && recordingFormat(p) == "mp4" && p.audio &&
       p.options.value("audio-codec").toString() == "raw")
     return {"audio-codec", "MP4 cannot contain raw audio. Choose MKV, another "
                            "audio codec, or disable audio forwarding."};
+  if (recording && audioOnly) {
+    const auto format = recordingFormat(p);
+    const auto codec =
+        p.options.value("audio-codec", "opus").toString().toLower();
+    if ((format == "mp4" || format == "m4a") && codec == "raw")
+      return {"audio-record-format",
+              "MP4/M4A cannot contain raw audio. Choose WAV, MKA/MKV, or an "
+              "encoded audio codec."};
+    const QMap<QString, QString> required{{"opus", "opus"}, {"aac", "aac"},
+                                          {"flac", "flac"}, {"wav", "raw"}};
+    if (required.contains(format) && required.value(format) != codec)
+      return {"audio-record-format",
+              format.toUpper() + " recording requires the " +
+                  required.value(format).toUpper() +
+                  " audio codec. Change the codec or container."};
+  }
   return {};
 }
 
@@ -599,11 +636,17 @@ Preferences Preferences::load(QSettings &s) {
     p.options.insert("audio-source", "auto");
   if (p.options.value("audio-dup", false).toBool())
     p.options.insert("audio-source", "playback");
+  if (settingsVersion < 3) {
+    const auto legacy = p.options.value("record-format", "mkv").toString();
+    p.options.insert("audio-record-format",
+                     QStringList{"mkv", "mp4"}.contains(legacy) ? legacy
+                                                                : "mka");
+  }
   return p;
 }
 
 void Preferences::save(QSettings &s) const {
-  s.setValue("metadata/settings-version", 2);
+  s.setValue("metadata/settings-version", 3);
   s.setValue("session/codec", codec);
   s.setValue("session/mouse", mouse);
   s.setValue("captures/directory", mediaDirectory);
@@ -877,7 +920,8 @@ QStringList mirrorArguments(const QString &serial, const Preferences &p,
                    : "--new-display=" + value.toString());
       continue;
     }
-    if (option.key == "record-format") {
+    if (option.key == "record-format" ||
+        option.key == "audio-record-format") {
       if (!recording.isEmpty())
         args << "--record-format=" + recordingFormat(p);
       continue;

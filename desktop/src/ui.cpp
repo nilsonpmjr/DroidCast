@@ -136,6 +136,12 @@ QIcon appIcon(const QString &name, const QColor &color) {
   } else if (name == "video") {
     p.drawRoundedRect(QRectF(2, 5, 14, 14), 2, 2);
     p.drawPolyline(QPolygonF{{16, 9}, {22, 6}, {22, 18}, {16, 15}});
+  } else if (name == "audio") {
+    p.drawLine(5, 9, 5, 15);
+    p.drawLine(9, 6, 9, 18);
+    p.drawLine(13, 3, 13, 21);
+    p.drawLine(17, 7, 17, 17);
+    p.drawLine(21, 10, 21, 14);
   } else {
     p.drawRoundedRect(QRectF(2, 4, 20, 16), 2, 2);
     p.drawPolyline(QPolygonF{{6, 9}, {9, 12}, {6, 15}});

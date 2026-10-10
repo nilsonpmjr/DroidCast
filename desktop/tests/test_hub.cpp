@@ -270,15 +270,19 @@ private slots:
     QVERIFY(!args.join(' ').contains("--keyboard="));
     QVERIFY(sessionIssue(prefs).message.isEmpty());
 
-    bool videoSourceAvailable = true, recordFormatAvailable = false;
+    bool videoSourceAvailable = true, videoFormatAvailable = true,
+         audioFormatAvailable = false;
     for (const auto &option : sessionOptions()) {
       if (option.key == "video-source")
         videoSourceAvailable = sessionOptionAvailable(option, prefs);
       if (option.key == "record-format")
-        recordFormatAvailable = sessionOptionAvailable(option, prefs);
+        videoFormatAvailable = sessionOptionAvailable(option, prefs);
+      if (option.key == "audio-record-format")
+        audioFormatAvailable = sessionOptionAvailable(option, prefs);
     }
     QVERIFY(!videoSourceAvailable);
-    QVERIFY(recordFormatAvailable);
+    QVERIFY(!videoFormatAvailable);
+    QVERIFY(audioFormatAvailable);
     prefs.options["no-audio-playback"] = true;
     QCOMPARE(sessionIssue(prefs).key, QString("no-audio-playback"));
     QVERIFY(sessionIssue(prefs, true).message.isEmpty());
@@ -1523,6 +1527,72 @@ private slots:
     engine.stop();
     QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
   }
+  void audioRecordingFormatsStayModeAndCodecSafe() {
+    Preferences prefs;
+    prefs.options = {{"audio-only", true},
+                     {"audio-codec", "opus"},
+                     {"audio-record-format", "mka"},
+                     {"record-format", "mp4"},
+                     {"record-orientation", "90"}};
+    QCOMPARE(recordingFormat(prefs), QString("mka"));
+    auto args = mirrorArguments("PHONE123", prefs, "audio.mka");
+    QVERIFY(args.contains("--record-format=mka"));
+    QVERIFY(!args.contains("--record-format=mp4"));
+    QVERIFY(!args.contains("--record-orientation=90"));
+
+    const QList<QPair<QString, QString>> exactFormats{
+        {"opus", "opus"}, {"aac", "aac"}, {"flac", "flac"}, {"wav", "raw"}};
+    for (const auto &[format, codec] : exactFormats) {
+      prefs.options["audio-record-format"] = format;
+      prefs.options["audio-codec"] = codec;
+      QVERIFY2(sessionIssue(prefs, true).message.isEmpty(),
+               qPrintable(format));
+      args = mirrorArguments("PHONE123", prefs, "audio." + format);
+      QVERIFY(args.contains("--record-format=" + format));
+      prefs.options["audio-codec"] = codec == "opus" ? "aac" : "opus";
+      QCOMPARE(sessionIssue(prefs, true).key, QString("audio-record-format"));
+    }
+    prefs.options["audio-record-format"] = "m4a";
+    prefs.options["audio-codec"] = "opus";
+    QVERIFY(sessionIssue(prefs, true).message.isEmpty());
+    prefs.options["audio-codec"] = "raw";
+    QCOMPARE(sessionIssue(prefs, true).key, QString("audio-record-format"));
+    prefs.options["audio-record-format"] = "mka";
+    QVERIFY(sessionIssue(prefs, true).message.isEmpty());
+
+    prefs.options["audio-only"] = false;
+    QCOMPARE(recordingFormat(prefs), QString("mp4"));
+    args = mirrorArguments("PHONE123", prefs, "video.mp4");
+    QVERIFY(args.contains("--record-format=mp4"));
+    QVERIFY(!args.join(' ').contains("audio-record-format"));
+
+    bool videoFormatAvailable = false, audioFormatAvailable = true;
+    for (const auto &option : sessionOptions()) {
+      if (option.key == "record-format")
+        videoFormatAvailable = sessionOptionAvailable(option, prefs);
+      if (option.key == "audio-record-format")
+        audioFormatAvailable = sessionOptionAvailable(option, prefs);
+    }
+    QVERIFY(videoFormatAvailable);
+    QVERIFY(!audioFormatAvailable);
+
+    QSettings legacy(storage.filePath("recording-v2.ini"),
+                     QSettings::IniFormat);
+    legacy.setValue("metadata/settings-version", 2);
+    legacy.setValue("options/audio-only", true);
+    legacy.setValue("options/record-format", "mp4");
+    const auto migrated = Preferences::load(legacy);
+    QCOMPARE(migrated.options.value("audio-record-format").toString(),
+             QString("mp4"));
+    auto saved = migrated;
+    saved.options["audio-record-format"] = "flac";
+    saved.save(legacy);
+    QCOMPARE(legacy.value("metadata/settings-version").toInt(), 3);
+    QCOMPARE(Preferences::load(legacy)
+                 .options.value("audio-record-format")
+                 .toString(),
+             QString("flac"));
+  }
   void inputWidgetsRespectModeAndReadOnly() {
     QSettings settings;
     auto prefs = bundledPreferences();
@@ -1750,6 +1820,66 @@ private slots:
     window.findChild<QPushButton *>("stopMirror")->click();
     QTRY_VERIFY(
         !window.findChild<QWidget *>("audioOnlySessionPanel")->isVisible());
+    bundledPreferences().save(settings);
+  }
+  void audioRecordingWidgetsAndLibraryFollowTheMode() {
+    QSettings settings;
+    auto prefs = bundledPreferences();
+    const auto directory = storage.filePath("format-library");
+    QVERIFY(QDir().mkpath(directory));
+    for (const auto &name : {"display.mkv", "listening.m4a", "screen.png"}) {
+      QFile file(QDir(directory).filePath(name));
+      QVERIFY(file.open(QIODevice::WriteOnly));
+      QVERIFY(file.write("test") == 4);
+    }
+    prefs.mediaDirectory = directory;
+    prefs.save(settings);
+
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(5);
+    auto *audioOnly = window.findChild<QCheckBox *>("option-audio-only");
+    auto *videoFormat = window.findChild<QComboBox *>("option-record-format");
+    auto *audioFormat =
+        window.findChild<QComboBox *>("option-audio-record-format");
+    auto *orientation =
+        window.findChild<QComboBox *>("option-record-orientation");
+    QVERIFY(audioOnly && videoFormat && audioFormat && orientation);
+    QVERIFY(videoFormat->isEnabled());
+    QVERIFY(!audioFormat->isEnabled());
+    for (const auto &format : {"mka", "m4a", "opus", "aac", "flac", "wav",
+                               "mkv", "mp4"})
+      QVERIFY(audioFormat->findText(format) >= 0);
+
+    audioOnly->setChecked(true);
+    QVERIFY(!videoFormat->isEnabled());
+    QVERIFY(audioFormat->isEnabled());
+    QVERIFY(!orientation->isEnabled());
+    audioFormat->setCurrentText("flac");
+    settings.sync();
+    QCOMPARE(settings.value("options/audio-record-format").toString(),
+             QString("flac"));
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+
+    window.showPage(3);
+    auto *filter = window.findChild<QComboBox *>("captureFilter");
+    auto *library = window.findChild<QListWidget *>("captureList");
+    QVERIFY(filter && library);
+    QCOMPARE(filter->findText("Audio recordings"), 2);
+    QCOMPARE(library->count(), 3);
+    filter->setCurrentIndex(2);
+    QCOMPARE(library->count(), 1);
+    QVERIFY(library->item(0)->text().startsWith("listening.m4a"));
+    filter->setCurrentIndex(1);
+    QCOMPARE(library->count(), 1);
+    QVERIFY(library->item(0)->text().startsWith("display.mkv"));
+    filter->setCurrentIndex(3);
+    QCOMPARE(library->count(), 1);
+    QVERIFY(library->item(0)->text().startsWith("screen.png"));
     bundledPreferences().save(settings);
   }
   void phoneControlsTargetDeviceAndRespectReadOnly() {

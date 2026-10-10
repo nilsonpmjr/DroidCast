@@ -95,17 +95,18 @@ Windows/macOS build paths have not yet been exercised.
   mode and report requests rather than assuming the hardware accepted them.
 - **Wireless pairing:** six-digit pairing code and separate pairing/connection
   addresses. Codes go through stdin and are never saved.
-- **Recordings & captures:** actual local PNG, MKV and MP4 files, type filters,
-  sizes/dates, open folder and open capture. An active recording cannot be opened
-  until the session ends.
+- **Recordings & captures:** actual local PNG, MKV and MP4 files plus dedicated
+  MKA, M4A, OPUS, AAC, FLAC and WAV audio recordings. Video, audio and screenshot
+  filters use distinct icons. An active recording cannot be opened until the
+  session ends.
 - **Input & controls:** SDK/UHID/disabled keyboard and mouse choices, accurate
   shortcut reference using scrcpy's default left Alt / left Super modifier, and
   a route to advanced input settings including UHID gamepad forwarding.
 - **Settings:** searchable categories for video, camera, audio, device, window,
   keyboard, mouse, gamepad, recording and virtual displays. Includes read-only
   mode, buffering, orientation,
-  SDK input preferences, MKV/MP4 recording, recording rotation and session time
-  limit. Settings apply to the next session and persist locally. Options that do
+  SDK input preferences, mode-specific recording containers, recording rotation
+  and session time limit. Settings apply to the next session and persist locally. Options that do
   not apply to the chosen input mode are inactive, but their saved values remain.
   Advanced video includes crop, capture orientation/locking, Android display ID,
   encoder name and automatic-downsize opt-out. Inspect an authorized phone while
@@ -118,8 +119,9 @@ Windows/macOS build paths have not yet been exercised.
   ignored controls without deleting their saved values. Disabling host playback
   keeps audio in a recording; without a recording, scrcpy has no audio consumer.
   Audio-only mode enforces that boundary and uses `--no-video --no-control`.
-  Recording currently keeps the explicit MKV/MP4 container choices; dedicated
-  M4A/MKA/OPUS/AAC/FLAC/WAV choices remain a separate compatibility step.
+  Display/camera sessions keep MKV/MP4, while audio-only sessions add
+  MKA/M4A/OPUS/AAC/FLAC/WAV. Dedicated formats are rejected before launch unless
+  their selected codec is compatible; old MKV/MP4 choices migrate safely.
   The **Virtual display** category adds Android 10+ display creation, resolution/
   density, flexible resizing, keyboard placement, system decorations and app
   handling on close. Inspecting the selected phone populates a searchable installed-
@@ -188,7 +190,8 @@ artwork: the iMac variant for desktop hosts and the MacBook variant when a lapto
 can be identified from host power/model information. Unknown form factors safely
 fall back to Desktop. The original TS project remains untouched.
 
-Next: validate display, virtual-display, Android actions, clipboard, measured FPS,
-live app launch and camera sessions with physical devices; add bounded file actions;
+Next: add one coherent Connection/Tunnels route for remote ADB and scrcpy tunnel
+settings; validate display, virtual-display, Android actions, audio recordings,
+clipboard, measured FPS, live app launch and camera sessions with physical devices;
 prototype embedded video before deciding its release scope; add per-device profiles
 and concurrent sessions; then finish standalone platform installers.
