@@ -84,6 +84,11 @@ private slots:
         "   (hw) [vendor]\n"
         " --video-codec=h265 --video-encoder=OMX.vendor.hevc (hybrid)\n"
         " --video-codec=av1 --video-encoder=c2.android.av1.encoder (sw)\n"
+        " invalid\nList of audio encoders:\n"
+        " --audio-codec=opus --audio-encoder=c2.android.opus.encoder (sw)\n"
+        " --audio-codec=aac --audio-encoder=OMX.vendor.aac (hw) [vendor]\n"
+        " --audio-codec=flac --audio-encoder=c2.android.flac.encoder (sw)\n"
+        " --audio-codec=raw --audio-encoder=ignored.raw\n"
         " invalid\nList of cameras:\n"
         " --display-id=99 (1x1)\n"
         " --video-codec=h264 --video-encoder=ignored\n";
@@ -100,8 +105,18 @@ private slots:
     QCOMPARE(encoders[0].attributes, QString("(hw) [vendor]"));
     QCOMPARE(encoders[1].codec, QString("h265"));
     QCOMPARE(encoders[2].codec, QString("av1"));
+    const auto audioEncoders = parseAudioEncoderCapabilities(report);
+    QCOMPARE(audioEncoders.size(), 3);
+    QCOMPARE(audioEncoders[0].codec, QString("opus"));
+    QCOMPARE(audioEncoders[0].name, QString("c2.android.opus.encoder"));
+    QCOMPARE(audioEncoders[0].attributes, QString("(sw)"));
+    QCOMPARE(audioEncoders[1].codec, QString("aac"));
+    QCOMPARE(audioEncoders[1].attributes, QString("(hw) [vendor]"));
+    QCOMPARE(audioEncoders[2].codec, QString("flac"));
     QVERIFY(parseDisplayCapabilities("List of displays:\n (none)").isEmpty());
     QVERIFY(parseVideoEncoderCapabilities("List of video encoders:\n malformed")
+                .isEmpty());
+    QVERIFY(parseAudioEncoderCapabilities("List of audio encoders:\n malformed")
                 .isEmpty());
     QVERIFY(parseDisplayCapabilities("--display-id=0 (1x1)").isEmpty());
   }
@@ -179,6 +194,65 @@ private slots:
     legacy.setValue("options/audio-source", "output");
     QCOMPARE(Preferences::load(legacy).options.value("audio-source").toString(),
              QString("auto"));
+  }
+  void advancedAudioArgumentsValidationAndDependencies() {
+    Preferences prefs;
+    prefs.options = {
+        {"audio-codec", "aac"},
+        {"audio-source", "mic-voice-communication"},
+        {"audio-encoder", "c2.android.aac.encoder"},
+        {"audio-bit-rate", 64000},
+        {"require-audio", true},
+        {"no-audio-playback", true},
+        {"audio-buffer", 120},
+        {"audio-output-buffer", 20},
+    };
+    auto args = mirrorArguments("PHONE123", prefs, "capture.mkv");
+    for (const auto &flag :
+         {"--audio-codec=aac", "--audio-source=mic-voice-communication",
+          "--audio-encoder=c2.android.aac.encoder", "--audio-bit-rate=64000",
+          "--require-audio", "--no-audio-playback", "--audio-buffer=120"})
+      QVERIFY2(args.contains(flag), flag);
+    QVERIFY(!args.contains("--audio-output-buffer=20"));
+    QVERIFY(sessionIssue(prefs, true).message.isEmpty());
+
+    prefs.options["audio-codec"] = "raw";
+    args = mirrorArguments("PHONE123", prefs, "capture.mkv");
+    QVERIFY(!args.join(' ').contains("--audio-encoder="));
+    QVERIFY(!args.join(' ').contains("--audio-bit-rate="));
+    prefs.options["audio-codec"] = "flac";
+    args = mirrorArguments("PHONE123", prefs, "capture.mkv");
+    QVERIFY(args.contains("--audio-encoder=c2.android.aac.encoder"));
+    QVERIFY(!args.join(' ').contains("--audio-bit-rate="));
+
+    prefs.options["audio-codec"] = "opus";
+    prefs.options["audio-source"] = "output";
+    prefs.options["audio-dup"] = true;
+    QCOMPARE(sessionIssue(prefs, true).key, QString("audio-source"));
+    prefs.options["audio-source"] = "playback";
+    QVERIFY(sessionIssue(prefs, true).message.isEmpty());
+    args = mirrorArguments("PHONE123", prefs, "capture.mkv");
+    QVERIFY(args.contains("--audio-dup"));
+    QVERIFY(args.contains("--audio-source=playback"));
+
+    QVERIFY(!textOptionError("audio-encoder", "encoder --bad").isEmpty());
+    prefs.audio = false;
+    args = mirrorArguments("PHONE123", prefs, "capture.mkv");
+    QVERIFY(args.contains("--no-audio"));
+    QVERIFY(!args.join(' ').contains("--audio-"));
+
+    QSettings settings(storage.filePath("audio.ini"), QSettings::IniFormat);
+    prefs.audio = true;
+    prefs.options["audio-source"] = "output";
+    prefs.options["audio-dup"] = true;
+    prefs.save(settings);
+    const auto restored = Preferences::load(settings);
+    QCOMPARE(restored.options.value("audio-source").toString(),
+             QString("playback"));
+    QVERIFY(restored.options.value("audio-dup").toBool());
+    QCOMPARE(restored.options.value("audio-bit-rate").toInt(), 64000);
+    QCOMPARE(restored.options.value("audio-encoder").toString(),
+             QString("c2.android.aac.encoder"));
   }
   void cameraSessionGuardsStayPinnedToTheSession() {
     Engine engine;
@@ -1476,6 +1550,86 @@ private slots:
     restored.audio = false;
     QVERIFY(
         !mirrorArguments("PHONE123", restored).contains("--audio-codec=aac"));
+  }
+  void advancedAudioWidgetsStayConsistentAndTargetScoped() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(5);
+    window.findChild<QComboBox *>("settingsCategory")->setCurrentText("Audio");
+    auto *codec = window.findChild<QComboBox *>("option-audio-codec");
+    auto *source = window.findChild<QComboBox *>("option-audio-source");
+    auto *duplicate = window.findChild<QCheckBox *>("option-audio-dup");
+    auto *encoder = window.findChild<QLineEdit *>("option-audio-encoder");
+    auto *detected = window.findChild<QComboBox *>("detectedAudioEncoder");
+    auto *bitRate = window.findChild<QSpinBox *>("option-audio-bit-rate");
+    auto *required = window.findChild<QCheckBox *>("option-require-audio");
+    auto *noPlayback =
+        window.findChild<QCheckBox *>("option-no-audio-playback");
+    auto *outputBuffer =
+        window.findChild<QSpinBox *>("option-audio-output-buffer");
+    QVERIFY(codec && source && duplicate && encoder && detected && bitRate &&
+            required && noPlayback && outputBuffer);
+    QVERIFY(source->findText("mic-voice-communication") >= 0);
+    QCOMPARE(bitRate->suffix(), QString(" bit/s"));
+
+    duplicate->setChecked(true);
+    QCOMPARE(source->currentText(), QString("playback"));
+    source->setCurrentText("mic-camcorder");
+    QVERIFY(!duplicate->isChecked());
+
+    encoder->setText("vendor.saved.encoder");
+    codec->setCurrentText("raw");
+    QVERIFY(!encoder->isEnabled());
+    QVERIFY(!bitRate->isEnabled());
+    QCOMPARE(encoder->text(), QString("vendor.saved.encoder"));
+    codec->setCurrentText("flac");
+    QVERIFY(encoder->isEnabled());
+    QVERIFY(!bitRate->isEnabled());
+    codec->setCurrentText("aac");
+    QVERIFY(bitRate->isEnabled());
+
+    noPlayback->setChecked(true);
+    QVERIFY(!outputBuffer->isEnabled());
+    noPlayback->setChecked(false);
+    QVERIFY(outputBuffer->isEnabled());
+    required->setChecked(true);
+
+    auto *inspect = window.findChild<QPushButton *>("inspectAudio");
+    QTRY_VERIFY(inspect->isEnabled());
+    inspect->click();
+    QTRY_COMPARE(detected->count(), 2);
+    const int aac = detected->findData("c2.android.aac.encoder");
+    QVERIFY(aac > 0);
+    detected->setCurrentIndex(aac);
+    QMetaObject::invokeMethod(detected, "activated", Qt::DirectConnection,
+                              Q_ARG(int, aac));
+    QCOMPARE(encoder->text(), QString("c2.android.aac.encoder"));
+
+    QCheckBox *forwardAudio = nullptr;
+    for (auto *check : window.findChildren<QCheckBox *>())
+      if (check->text() == "Forward audio") {
+        forwardAudio = check;
+        break;
+      }
+    QVERIFY(forwardAudio);
+    forwardAudio->setChecked(false);
+    QVERIFY(!codec->isEnabled());
+    QVERIFY(!detected->isEnabled());
+    forwardAudio->setChecked(true);
+    QVERIFY(codec->isEnabled());
+    QVERIFY(detected->isEnabled());
+
+    window.findChild<QListWidget *>("devices")->setCurrentRow(1);
+    QCOMPARE(detected->count(), 1);
+    QVERIFY(!detected->isEnabled());
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    bundledPreferences().save(settings);
   }
   void phoneControlsTargetDeviceAndRespectReadOnly() {
     Engine engine;

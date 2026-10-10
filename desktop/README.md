@@ -108,6 +108,11 @@ Windows/macOS build paths have not yet been exercised.
   idle to populate guided display and codec-matched encoder choices. The raw report
   and manual fields remain available for incomplete vendor declarations. Inspection
   has cancellation and a timeout; it does not start a mirror.
+  The **Audio** category exposes every scrcpy capture source, Android 13+ playback
+  duplication, codec-matched inspected/manual encoders, bit rate, capture-required
+  policy, host playback and both buffers. Codec and playback dependencies disable
+  ignored controls without deleting their saved values. Disabling host playback
+  keeps audio in a recording; without a recording, scrcpy has no audio consumer.
   The **Virtual display** category adds Android 10+ display creation, resolution/
   density, flexible resizing, keyboard placement, system decorations and app
   handling on close. Inspecting the selected phone populates a searchable installed-

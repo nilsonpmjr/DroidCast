@@ -25,7 +25,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Configuration routes | Partial | Searchable Video, Camera, Audio, Device, Window, Keyboard, Mouse, Gamepad, Recording and Virtual display categories. | Connection/Tunnels, Control, OTG, Video4Linux and complete Shortcuts routes. |
 | Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, inspected-app launch, one-file transfer, Android/window rotation, reset video, mirror-window actions, rendered-FPS measurement and contextual camera controls. | Decide whether multi-file drag/drop and transfer progress belong in release scope. |
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
-| Audio | Partial | Enablement, source, codec and buffers. | Duplication, encoder/bitrate, require-audio, audio-only and playback policies. |
+| Audio | Partial | Enablement, all capture sources, Android playback duplication, codec-matched inspected/manual encoder, bitrate, require-audio, host playback and buffers. | Audio-only lifecycle/recording workflow and physical-device proof. |
 | Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior and UHID gamepad. | Mouse bindings, shortcut modifier, AOA modes, gesture help and peripheral tests. |
 | Virtual display | Partial | Creation, size/DPI, flex, searchable inspected-app picker, manual package fallback, IME, decorations and close policy. | Android 10+ hardware journeys. |
 | Camera | Partial | Source, ID/facing, guided declared size/FPS/high-speed choices, manual fallback, startup torch/zoom and live torch/zoom. | Android-version/capability gates and real camera tests. |
@@ -36,25 +36,24 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
 
-## Next implementation: complete advanced audio configuration
+## Next implementation: first-class audio-only sessions
 
-Bounded one-file transfer is complete in code. The next settings slice should expose
-the remaining everyday audio policies without turning the UI into a raw flag editor.
+Advanced audio policy and encoder guidance are complete in code. Audio-only must be a
+real lifecycle mode rather than a cosmetic shortcut for several raw flags.
 
-1. Add audio duplication, encoder, bit rate, require-audio and host-playback controls
-   to the existing Audio route, using the fork's typed preferences and argument list.
-2. Make duplication select the playback source as scrcpy does, explain its Android
-   13+ requirement, and prevent contradictory source/control states in the UI.
-3. Disable or explain bit rate and encoder fields for raw audio (and ignored bit rate
-   cases), while preserving saved values when a temporarily incompatible codec is
-   selected.
-4. Add an explicit audio-only workflow rather than asking users to infer a combination
-   of no-video/no-control/no-window flags. Keep recording and playback consequences
-   visible before launch.
-5. Extend validation and argument tests for every dependency, invalid numeric/text
-   value and persisted round trip. Retain the 920×680 no-horizontal-scroll contract.
-6. Hardware-test Android 11 fallback, Android 12 output capture, Android 13 duplication,
-   microphone sources, encoder fallback and recordings with host playback disabled.
+1. Add a typed Audio-only session mode that emits `--no-video --no-control`, explains
+   the loss of the mirror window/input, and keeps host playback or recording explicit.
+2. Extend the native desktop bridge with a one-shot `first-audio-frame` event from the
+   decoded audio path. Do not mark a session streaming merely because the process or
+   bridge started; Android connection/audio failures must remain distinguishable.
+3. Make lifecycle copy and the Active session workspace contextual: listening versus
+   recording, no screenshot/window/FPS/app-launch actions, and clean stop/finalization.
+4. Support audio-only recording containers only after defining OPUS/AAC/FLAC/WAV
+   compatibility and file naming. Until then, keep the existing MKV/MP4 path explicit.
+5. Test first-frame success, required-audio failure, optional-audio-with-no-video
+   rejection, disconnect, recording finalization and old-engine capability behavior.
+6. Hardware-test Android 11 unlocked-start behavior, Android 12+ output/microphone,
+   Android 13 duplication, Bluetooth/routing changes and long recordings.
 
 ## Release-proof still required for recent work
 
@@ -79,6 +78,10 @@ the remaining everyday audio policies without turning the UI into a raw flag edi
   with spaces/Unicode, replacement of an existing filename, cancellation and storage-
   permission failures over USB and wireless ADB on Linux, Windows and macOS. Automated
   tests prove command construction and state handling, not bytes written by a phone.
+- **Advanced audio:** exercise every source family that the phone permits, Android 13+
+  duplication, inspected/default encoder fallback, custom bitrates, required-audio
+  failures and recording with computer playback disabled. Vendor audio policies and
+  routes cannot be proven by the fake-process tests.
 - **Cross-platform bridge:** exercise stdin commands and shutdown on Windows; validate
   the app bundle and pipe behavior on macOS.
 - **Host branding:** confirm Desktop/Laptop selection on Windows hardware and both

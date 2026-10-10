@@ -41,12 +41,13 @@ private:
       *sessionAppSelector = nullptr, *cameraIdSelector = nullptr,
       *cameraSizeSelector = nullptr, *cameraFpsSelector = nullptr,
       *displaySelector = nullptr, *videoEncoderSelector = nullptr,
-      *appSelector = nullptr;
+      *audioEncoderSelector = nullptr, *appSelector = nullptr;
   QString fingerprint, cameraCapabilitySerial, deviceCapabilitySerial,
       appCapabilitySerial, pendingPushPath;
   QList<CameraCapability> cameraCapabilities;
   QList<DisplayCapability> displayCapabilities;
   QList<VideoEncoderCapability> videoEncoderCapabilities;
+  QList<AudioEncoderCapability> audioEncoderCapabilities;
   QList<AppCapability> appCapabilities;
   bool closing = false;
   QWidget *devicesPage();

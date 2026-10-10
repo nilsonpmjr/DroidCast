@@ -368,3 +368,23 @@ device compatibility testing remain open.
   cancellation, active-device pinning, read-only and camera sessions, accessibility
   and the 920×680 layout. Physical phone and cross-platform transfer proof remains in
   the gap register.
+
+## Part 19: advanced audio policy and encoder guidance
+
+- Expanded the Audio settings route from four basic fields to every scrcpy audio
+  source plus Android 13+ duplication, manual/inspected encoder, bit rate,
+  require-audio, host-playback policy and both buffering controls.
+- Made duplication select the playback source, while an explicit switch to another
+  source turns duplication off. Persisted contradictory legacy state is normalized;
+  programmatic contradictory state is rejected before starting a session.
+- Disabled encoder for raw audio, bitrate for raw/FLAC and output buffering when host
+  playback is disabled. Values are preserved and return when compatible again.
+- Parsed the existing bounded inspection report's audio-encoder section and added a
+  codec-filtered, selected-device-scoped picker. Manual safe-name fallback remains,
+  and changing phones clears declarations rather than reusing stale capabilities.
+- Added argument, validation, persistence, defensive parser, UI dependency,
+  accessibility and 920×680 layout coverage. Fake tests do not prove Android version,
+  routing, vendor source or encoder behavior; those checks remain in release proof.
+- Deliberately deferred Audio-only mode: the current lifecycle is first-video-frame
+  backed. It needs a native first-audio-frame event before the desktop can represent
+  connection, streaming and failure states truthfully.

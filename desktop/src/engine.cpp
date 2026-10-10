@@ -247,7 +247,46 @@ const QList<SessionOption> &sessionOptions() {
        "camera capture. Output requires Android 11+. Playback requires Android "
        "13+; apps may opt out.",
        "auto",
-       {"auto", "output", "playback", "mic"}},
+       {"auto", "output", "playback", "mic", "mic-unprocessed", "mic-camcorder",
+        "mic-voice-recognition", "mic-voice-communication", "voice-call",
+        "voice-call-uplink", "voice-call-downlink", "voice-performance"}},
+      {"audio-dup",
+       "Audio",
+       "Keep audio playing on Android",
+       "Android 13+. Uses the playback source so captured audio also continues "
+       "on the phone. Applications may opt out of playback capture.",
+       false,
+       {}},
+      {"audio-encoder",
+       "Audio",
+       "Audio encoder",
+       "Leave empty for automatic selection. Inspect the phone and choose an "
+       "encoder matching the audio codec. Raw audio has no encoder.",
+       QString(""),
+       {}},
+      {"audio-bit-rate",
+       "Audio",
+       "Audio bit rate",
+       "Bits per second; 128000 is the engine default. Ignored for FLAC and "
+       "raw audio.",
+       128000,
+       {},
+       1,
+       100000000},
+      {"require-audio",
+       "Audio",
+       "Fail if audio capture fails",
+       "Normally a session continues with video when Android audio capture is "
+       "unavailable. Enable this to fail the whole session instead.",
+       false,
+       {}},
+      {"no-audio-playback",
+       "Audio",
+       "Do not play audio on this computer",
+       "Recordings still include audio. Without a recording, the engine stops "
+       "audio capture because it has no remaining consumer.",
+       false,
+       {}},
       {"audio-buffer",
        "Audio",
        "Audio buffer (ms)",
@@ -346,8 +385,18 @@ bool sessionOptionAvailable(const SessionOption &option, const Preferences &p) {
     return !camera && !readOnly && p.mouse == "sdk";
   if (option.category == "Gamepad")
     return !camera && !readOnly;
-  if (option.category == "Audio")
-    return p.audio;
+  if (option.category == "Audio") {
+    if (!p.audio)
+      return false;
+    const auto codec = p.options.value("audio-codec", "opus").toString();
+    if (option.key == "audio-encoder")
+      return codec != "raw";
+    if (option.key == "audio-bit-rate")
+      return codec != "raw" && codec != "flac";
+    if (option.key == "audio-output-buffer")
+      return !p.options.value("no-audio-playback", false).toBool();
+    return true;
+  }
   return true;
 }
 
@@ -449,12 +498,12 @@ QString textOptionError(const QString &key, const QString &value) {
     if (!valid)
       return "Use width:height:x:y; dimensions 1–65535 and offsets 0–65535, or "
              "leave empty.";
-  } else if (key == "video-encoder" &&
+  } else if ((key == "video-encoder" || key == "audio-encoder") &&
              !QRegularExpression("\\A[A-Za-z0-9_.-]{1,256}\\z")
                   .match(value)
                   .hasMatch())
-    return "Use an encoder name from the phone report (letters, numbers, dots, "
-           "underscores or hyphens), or leave empty.";
+    return "Use an encoder name from the phone report (letters, numbers, "
+           "dots, underscores or hyphens), or leave empty.";
   return {};
 }
 
@@ -487,6 +536,10 @@ PreferenceIssue sessionIssue(const Preferences &p, bool recording) {
     return {"crop",
             "Resizable virtual displays cannot use a capture crop. Clear "
             "Capture crop or disable Resize Android with the window."};
+  if (p.audio && p.options.value("audio-dup", false).toBool() &&
+      p.options.value("audio-source", "auto").toString() != "playback")
+    return {"audio-source",
+            "Keeping audio on Android requires the playback audio source."};
   if (recording && recordingFormat(p) == "mp4" && p.audio &&
       p.options.value("audio-codec").toString() == "raw")
     return {"audio-codec", "MP4 cannot contain raw audio. Choose MKV, another "
@@ -523,6 +576,8 @@ Preferences Preferences::load(QSettings &s) {
   if (settingsVersion < 2 &&
       p.options.value("audio-source").toString() == "output")
     p.options.insert("audio-source", "auto");
+  if (p.options.value("audio-dup", false).toBool())
+    p.options.insert("audio-source", "playback");
   return p;
 }
 
@@ -668,6 +723,31 @@ parseVideoEncoderCapabilities(const QString &output) {
   for (const auto &raw : output.split('\n')) {
     const auto line = raw.trimmed();
     if (line.contains("List of video encoders:")) {
+      inList = true;
+      continue;
+    }
+    if (!inList)
+      continue;
+    if (line.startsWith("List of "))
+      break;
+    const auto match = pattern.match(raw);
+    if (match.hasMatch())
+      result.append(
+          {match.captured(1), match.captured(2), match.captured(3).trimmed()});
+  }
+  return result;
+}
+
+QList<AudioEncoderCapability>
+parseAudioEncoderCapabilities(const QString &output) {
+  QList<AudioEncoderCapability> result;
+  bool inList = false;
+  static const QRegularExpression pattern(
+      "\\A\\s*--audio-codec=(opus|aac|flac)\\s+"
+      "--audio-encoder=([^\\s]+)(?:\\s+(.*))?\\z");
+  for (const auto &raw : output.split('\n')) {
+    const auto line = raw.trimmed();
+    if (line.contains("List of audio encoders:")) {
       inList = true;
       continue;
     }

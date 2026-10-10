@@ -35,9 +35,14 @@ struct DisplayCapability {
 struct VideoEncoderCapability {
   QString codec, name, attributes;
 };
+struct AudioEncoderCapability {
+  QString codec, name, attributes;
+};
 QList<DisplayCapability> parseDisplayCapabilities(const QString &output);
 QList<VideoEncoderCapability>
 parseVideoEncoderCapabilities(const QString &output);
+QList<AudioEncoderCapability>
+parseAudioEncoderCapabilities(const QString &output);
 struct AppCapability {
   QString name, package;
   bool system;

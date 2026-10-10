@@ -1075,6 +1075,23 @@ QWidget *Window::settingsPage() {
               findChild<QLineEdit *>("option-video-encoder")->setText(value);
           });
     }
+    if (category == "Audio") {
+      audioEncoderSelector = new QComboBox;
+      audioEncoderSelector->setObjectName("detectedAudioEncoder");
+      audioEncoderSelector->setAccessibleName("Detected audio encoder");
+      field(fields, "Detected encoder", audioEncoderSelector);
+      fields->addRow(
+          label("Inspect the selected phone to populate encoders matching the "
+                "chosen audio codec. The manual field remains available below.",
+                "muted"));
+      connect(
+          audioEncoderSelector, qOverload<int>(&QComboBox::activated), this,
+          [this](int index) {
+            const auto value = audioEncoderSelector->itemData(index).toString();
+            if (!value.isEmpty())
+              findChild<QLineEdit *>("option-audio-encoder")->setText(value);
+          });
+    }
     if (category == "Camera") {
       cameraIdSelector = new QComboBox;
       cameraIdSelector->setObjectName("detectedCamera");
@@ -1135,10 +1152,22 @@ QWidget *Window::settingsPage() {
         connect(combo, &QComboBox::currentTextChanged, this,
                 [this, key = option.key](const QString &value) {
                   engine.preferences.options.insert(key, value);
+                  if (key == "audio-source" && value != "playback" &&
+                      engine.preferences.options.value("audio-dup", false)
+                          .toBool()) {
+                    engine.preferences.options.insert("audio-dup", false);
+                    if (auto *duplicate =
+                            findChild<QCheckBox *>("option-audio-dup")) {
+                      const QSignalBlocker blocker(duplicate);
+                      duplicate->setChecked(false);
+                    }
+                  }
                   savePreferences();
                   if (key == "video-source" || key == "camera-facing")
                     updateCameraSelectors();
                   if (key == "video-source")
+                    updateDeviceCapabilitySelectors();
+                  if (key == "audio-codec")
                     updateDeviceCapabilitySelectors();
                 });
         control = combo;
@@ -1160,7 +1189,7 @@ QWidget *Window::settingsPage() {
         if (option.key == "camera-id" || option.key == "camera-size")
           connect(edit, &QLineEdit::editingFinished, this,
                   &Window::updateCameraSelectors);
-        if (option.key == "video-encoder")
+        if (option.key == "video-encoder" || option.key == "audio-encoder")
           connect(edit, &QLineEdit::editingFinished, this,
                   &Window::updateDeviceCapabilitySelectors);
         if (option.key == "start-app")
@@ -1177,6 +1206,15 @@ QWidget *Window::settingsPage() {
         connect(check, &QCheckBox::toggled, this,
                 [this, key = option.key](bool value) {
                   engine.preferences.options.insert(key, value);
+                  if (key == "audio-dup" && value) {
+                    engine.preferences.options.insert("audio-source",
+                                                      "playback");
+                    if (auto *source =
+                            findChild<QComboBox *>("option-audio-source")) {
+                      const QSignalBlocker blocker(source);
+                      source->setCurrentText("playback");
+                    }
+                  }
                   savePreferences();
                   updateActions();
                   if (key == "virtual-display")
@@ -1192,6 +1230,10 @@ QWidget *Window::settingsPage() {
         auto *spin = new QSpinBox;
         spin->setRange(option.minimum, option.maximum);
         spin->setValue(current.toInt());
+        if (option.key == "audio-bit-rate") {
+          spin->setSingleStep(1000);
+          spin->setSuffix(" bit/s");
+        }
         connect(spin, &QSpinBox::valueChanged, this,
                 [this, key = option.key](int value) {
                   engine.preferences.options.insert(key, value);
@@ -1218,23 +1260,26 @@ QWidget *Window::settingsPage() {
         fields->addRow(validation);
       fields->addRow(label(option.help, "muted"));
     }
-    if (category == "Video" || category == "Camera" ||
+    if (category == "Video" || category == "Audio" || category == "Camera" ||
         category == "Virtual display") {
       const bool cameraReport = category == "Camera";
+      const bool audioReport = category == "Audio";
       const bool appReport = category == "Virtual display";
       terms += cameraReport ? " inspect camera sizes rates list-cameras "
                               "list-camera-sizes"
                : appReport  ? " inspect installed apps packages list-apps"
                             : " inspect resources displays encoders "
                               "list-displays list-encoders";
-      auto *inspect = button(cameraReport ? "Inspect phone cameras"
-                             : appReport  ? "Inspect installed apps"
-                                          : "Inspect selected phone",
+      auto *inspect = button(cameraReport  ? "Inspect phone cameras"
+                             : audioReport ? "Inspect audio encoders"
+                             : appReport   ? "Inspect installed apps"
+                                           : "Inspect selected phone",
                              "phone");
       inspect->setProperty("inspectDevice", true);
-      inspect->setObjectName(cameraReport ? "inspectCamera"
-                             : appReport  ? "inspectApps"
-                                          : "inspectDevice");
+      inspect->setObjectName(cameraReport  ? "inspectCamera"
+                             : audioReport ? "inspectAudio"
+                             : appReport   ? "inspectApps"
+                                           : "inspectDevice");
       auto *cancel = button("Cancel inspection");
       cancel->setProperty("cancelInspection", true);
       auto *actions = new QHBoxLayout;
@@ -1242,30 +1287,35 @@ QWidget *Window::settingsPage() {
       actions->addWidget(cancel);
       fields->addRow(actions);
       auto *report = new QPlainTextEdit;
-      report->setObjectName(cameraReport ? "cameraCapabilities"
-                            : appReport  ? "appCapabilities"
-                                         : "deviceCapabilities");
+      report->setObjectName(cameraReport  ? "cameraCapabilities"
+                            : audioReport ? "audioCapabilities"
+                            : appReport   ? "appCapabilities"
+                                          : "deviceCapabilities");
       report->setAccessibleName(
-          cameraReport ? "Selected phone cameras report"
-          : appReport  ? "Selected phone installed applications report"
-                       : "Selected phone displays and encoders report");
+          cameraReport  ? "Selected phone cameras report"
+          : audioReport ? "Selected phone audio encoders report"
+          : appReport   ? "Selected phone installed applications report"
+                        : "Selected phone displays and encoders report");
       report->setReadOnly(true);
       report->setMaximumBlockCount(1000);
       report->setMinimumHeight(160);
       report->setPlainText(
-          cameraReport ? "Select an authorized Android 12+ phone, then "
-                         "inspect it while no mirror is running. Copy "
-                         "a camera ID, size and supported frame rate "
-                         "into the fields above. Android's declared "
-                         "combinations may be incomplete or inaccurate."
-          : appReport  ? "Select an authorized phone, then inspect it "
-                         "while no mirror is running. Search installed "
-                         "applications above by name or package."
-                       : "Select an authorized phone in Connected "
-                         "devices, then inspect it while no mirror is "
-                         "running. Copy a display ID or matching "
-                         "encoder name into the fields above. Listed "
-                         "resources may change after reconnecting.");
+          cameraReport  ? "Select an authorized Android 12+ phone, then "
+                          "inspect it while no mirror is running. Copy "
+                          "a camera ID, size and supported frame rate "
+                          "into the fields above. Android's declared "
+                          "combinations may be incomplete or inaccurate."
+          : audioReport ? "Select an authorized phone, then inspect it while "
+                          "no mirror is running. Choose an encoder matching "
+                          "the selected codec, or keep automatic selection."
+          : appReport   ? "Select an authorized phone, then inspect it "
+                          "while no mirror is running. Search installed "
+                          "applications above by name or package."
+                        : "Select an authorized phone in Connected "
+                          "devices, then inspect it while no mirror is "
+                          "running. Copy a display ID or matching "
+                          "encoder name into the fields above. Listed "
+                          "resources may change after reconnecting.");
       fields->addRow(report);
       connect(inspect, &QPushButton::clicked, this,
               [this] { engine.inspectDevice(selectedSerial()); });
@@ -1463,18 +1513,21 @@ void Window::setDeviceCapabilities(const QString &serial,
     deviceCapabilitySerial.clear();
     displayCapabilities.clear();
     videoEncoderCapabilities.clear();
+    audioEncoderCapabilities.clear();
   } else {
     displayCapabilities = parseDisplayCapabilities(report);
     videoEncoderCapabilities = parseVideoEncoderCapabilities(report);
-    deviceCapabilitySerial =
-        displayCapabilities.isEmpty() && videoEncoderCapabilities.isEmpty()
-            ? QString{}
-            : serial;
+    audioEncoderCapabilities = parseAudioEncoderCapabilities(report);
+    deviceCapabilitySerial = displayCapabilities.isEmpty() &&
+                                     videoEncoderCapabilities.isEmpty() &&
+                                     audioEncoderCapabilities.isEmpty()
+                                 ? QString{}
+                                 : serial;
   }
   updateDeviceCapabilitySelectors();
 }
 void Window::updateDeviceCapabilitySelectors() {
-  if (!displaySelector || !videoEncoderSelector)
+  if (!displaySelector || !videoEncoderSelector || !audioEncoderSelector)
     return;
   const QSignalBlocker displayBlocker(displaySelector);
   const QSignalBlocker encoderBlocker(videoEncoderSelector);
@@ -1508,6 +1561,26 @@ void Window::updateDeviceCapabilitySelectors() {
   }
   videoEncoderSelector->setCurrentIndex(
       qMax(0, videoEncoderSelector->findData(selectedEncoder)));
+
+  const QSignalBlocker audioEncoderBlocker(audioEncoderSelector);
+  const auto selectedAudioEncoder =
+      engine.preferences.options.value("audio-encoder").toString().trimmed();
+  audioEncoderSelector->clear();
+  audioEncoderSelector->addItem(audioEncoderCapabilities.isEmpty()
+                                    ? "Inspect phone to discover encoders"
+                                    : "Use manual encoder field below",
+                                QString{});
+  const auto audioCodec =
+      engine.preferences.options.value("audio-codec", "opus").toString();
+  for (const auto &encoder : audioEncoderCapabilities) {
+    if (encoder.codec != audioCodec)
+      continue;
+    const auto suffix =
+        encoder.attributes.isEmpty() ? QString{} : " · " + encoder.attributes;
+    audioEncoderSelector->addItem(encoder.name + suffix, encoder.name);
+  }
+  audioEncoderSelector->setCurrentIndex(
+      qMax(0, audioEncoderSelector->findData(selectedAudioEncoder)));
   const bool cameraMode =
       engine.preferences.options.value("video-source", "display").toString() ==
       "camera";
@@ -1516,6 +1589,9 @@ void Window::updateDeviceCapabilitySelectors() {
   displaySelector->setEnabled(!cameraMode && !virtualDisplay &&
                               !displayCapabilities.isEmpty());
   videoEncoderSelector->setEnabled(videoEncoderSelector->count() > 1);
+  audioEncoderSelector->setEnabled(engine.preferences.audio &&
+                                   audioCodec != "raw" &&
+                                   audioEncoderSelector->count() > 1);
 }
 void Window::setAppCapabilities(const QString &serial, const QString &report) {
   if (serial != selectedSerial()) {
@@ -1615,6 +1691,7 @@ void Window::savePreferences() {
     QSignalBlocker blocker(check);
     check->setChecked(value);
   }
+  updateDeviceCapabilitySelectors();
   const bool ready = !executablePath(engine.preferences.adb).isEmpty() &&
                      !executablePath(engine.preferences.scrcpy).isEmpty() &&
                      QFileInfo::exists(engine.preferences.server);
@@ -1701,6 +1778,7 @@ void Window::updateActions() {
     deviceCapabilitySerial.clear();
     displayCapabilities.clear();
     videoEncoderCapabilities.clear();
+    audioEncoderCapabilities.clear();
     updateDeviceCapabilitySelectors();
   }
   if (!appCapabilitySerial.isEmpty() &&
