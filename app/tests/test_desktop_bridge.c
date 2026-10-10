@@ -1,5 +1,7 @@
 #include <assert.h>
+#include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 #include <SDL3/SDL.h>
 
@@ -44,6 +46,30 @@ int main(void) {
         assert(event.user.code == expected[i]);
     }
     assert(!SDL_WaitEventTimeout(&event, 100));
+    sc_desktop_bridge_stop();
+
+    // Framed app payloads may span reads, and command bytes inside a package
+    // (notably Q) must remain data rather than terminating the child.
+    sc_desktop_bridge_start();
+    const char *package = "com.Qtest.App";
+    uint8_t app_prefix[] = {'A', (uint8_t) strlen(package), 'c', 'o', 'm'};
+    assert(write(pipes[1], app_prefix, sizeof(app_prefix)) ==
+           (ssize_t) sizeof(app_prefix));
+    SDL_Delay(75);
+    assert(write(pipes[1], package + 3, strlen(package) - 3) ==
+           (ssize_t) strlen(package) - 3);
+    assert(SDL_WaitEventTimeout(&event, 1000));
+    assert(event.type == SC_EVENT_DESKTOP_WINDOW_COMMAND);
+    assert(event.user.code == 'A');
+    assert(!strcmp(event.user.data1, package));
+    free(event.user.data1);
+
+    const char *invalid_package = "com.bad;rm";
+    uint8_t invalid_frame[2 + 10] = {'A', 10};
+    memcpy(&invalid_frame[2], invalid_package, 10);
+    assert(write(pipes[1], invalid_frame, sizeof(invalid_frame)) ==
+           (ssize_t) sizeof(invalid_frame));
+    assert(!SDL_WaitEventTimeout(&event, 150));
     sc_desktop_bridge_stop();
 
     // Closing the parent pipe must also leave through the normal quit route.

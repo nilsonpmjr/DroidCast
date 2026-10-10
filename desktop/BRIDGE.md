@@ -4,12 +4,13 @@ The bundled fork opts into the bridge when `DROIDCAST_SESSION_TOKEN` contains
 exactly 32 lowercase hexadecimal characters. Regular scrcpy invocations retain
 their normal stdin behavior. The desktop generates a new token per launch.
 
-- Parent → child stdin: the byte `Q` requests an SDL quit event. EOF does the same.
-  This follows scrcpy's normal window-close cleanup, including joining the recorder.
+- Parent → child stdin: the byte `Q` at a command boundary requests an SDL quit
+  event. EOF does the same. This follows scrcpy's normal window-close cleanup,
+  including joining the recorder.
 - After the matching readiness event, the parent can send the commands below.
   They are whitelisted bytes delivered to the SDL thread, not
   shell commands or synthesized keyboard shortcuts. Unknown bytes are ignored;
-  `Q` takes priority.
+  `Q` is reserved as the quit command outside a framed payload.
 - Child → parent stdout: `DROIDCAST/1 <token> <event>\n`.
 - Events: `bridge-ready`, `bridge-error`, `first-frame`, `recording-finalized`,
   `recording-error`, `ended`, `disconnected`, `failed`.
@@ -22,9 +23,11 @@ their normal stdin behavior. The desktop generates a new token per launch.
 - Camera events: `camera-controls-ready` and
   `camera-result:<byte>:handled` / `camera-result:<byte>:unavailable`.
 - FPS events: `fps-controls-ready`,
-  `fps-result:<byte>:handled` / `fps-result:<byte>:unavailable`, and
+  `fps-result:<byte>:handled` / `fps-result:<byte>:unavailable`,
   `fps-state:started` / `fps-state:stopped`, and
   `fps-sample:<rendered>:<skipped>`.
+- App events: `app-controls-ready` and
+  `app-result:A:handled` / `app-result:A:unavailable`.
 - `first-frame` is emitted once, after uploading and rendering a video frame.
   Starting a process alone is not evidence of video readiness.
 - Recording status comes from the recorder callback after trailer/output close;
@@ -64,6 +67,10 @@ their normal stdin behavior. The desktop generates a new token per launch.
 | `I` | Start measuring frames rendered by the mirror |
 | `i` | Stop measuring rendered frames |
 
+| Frame | Android application action |
+| --- | --- |
+| `A` + one-byte length + exact package bytes | Launch an inspected package on the mirrored display |
+
 FPS measurement is a host-side video capability advertised after the first frame.
 It works for display and camera streams, including read-only sessions, because it
 does not send control messages to Android. Each structured sample contains the
@@ -72,6 +79,16 @@ not the configured capture limit, display refresh rate or end-to-end latency.
 Samples stop when measurement or the session stops and retain the session token,
 so the desktop rejects stale or unrelated output. State events also keep the
 desktop synchronized when the native scrcpy FPS shortcut is used in the mirror.
+
+App launch is the only framed request in version 1. Its ASCII package payload is
+1–255 bytes and must match the same exact-package grammar used by the desktop;
+fragmented pipe reads are reassembled before an SDL event is created. Command-like
+bytes inside the payload remain data. The SDL thread queues scrcpy's existing
+`START_APP` control message, whose server selects the display currently captured,
+including a secondary or virtual display. It performs no shell interpolation and
+does not force-stop the app. `handled` means the request entered the control queue,
+not that Android found an activity or brought it to the foreground. App launch is
+not advertised for camera or read-only sessions.
 
 Camera commands are advertised only for a camera stream and require the Android
 control channel. A handled result confirms that the request entered that channel;
@@ -103,7 +120,7 @@ the window manager honored the requested geometry/fullscreen state. The desktop
 does not maintain optimistic fullscreen or paused toggle state, so keyboard
 shortcuts in the mirror cannot leave a stale toggle in the desktop UI.
 
-Only one bridge command can be outstanding across all five families. After two
+Only one bridge command can be outstanding across all six families. After two
 seconds without a matching response, the desktop disables that command family
 until a new session starts. It never retries toggles automatically, and late
 replies cannot complete a later command in the same session. A camera or Android

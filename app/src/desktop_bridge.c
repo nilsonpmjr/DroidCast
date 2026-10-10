@@ -1,6 +1,7 @@
 #include "desktop_bridge.h"
 
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -20,9 +21,123 @@ static SDL_TimerID input_timer;
 static bool frame_reported;
 static bool camera_controls_reported;
 static bool android_controls_reported;
+static bool app_controls_reported;
 static bool clipboard_controls_reported;
 static bool clipboard_copy_pending;
 static bool fps_controls_reported;
+
+enum sc_desktop_input_state {
+    SC_DESKTOP_INPUT_COMMAND,
+    SC_DESKTOP_INPUT_APP_LENGTH,
+    SC_DESKTOP_INPUT_APP_PAYLOAD,
+};
+
+static enum sc_desktop_input_state input_state;
+static uint8_t app_payload_length;
+static uint8_t app_payload_received;
+static char app_payload[256];
+
+static bool
+is_ascii_alpha(char c) {
+    return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z');
+}
+
+static bool
+is_ascii_alnum(char c) {
+    return is_ascii_alpha(c) || (c >= '0' && c <= '9');
+}
+
+static bool
+is_exact_package(const char *package, size_t length) {
+    bool segment_start = true;
+    for (size_t i = 0; i < length; ++i) {
+        char c = package[i];
+        if (segment_start) {
+            if (!is_ascii_alpha(c)) {
+                return false;
+            }
+            segment_start = false;
+        } else if (c == '.') {
+            segment_start = true;
+        } else if (!is_ascii_alnum(c) && c != '_') {
+            return false;
+        }
+    }
+    return length && !segment_start;
+}
+
+static void
+report_app_unavailable(void) {
+    sc_desktop_bridge_report("app-result:A:unavailable");
+}
+
+static void
+push_app_command(void) {
+    app_payload[app_payload_length] = '\0';
+    if (!is_exact_package(app_payload, app_payload_length)) {
+        report_app_unavailable();
+        return;
+    }
+
+    char *package = strdup(app_payload);
+    if (!package) {
+        report_app_unavailable();
+        return;
+    }
+    SDL_Event event = {
+        .user = {
+            .type = SC_EVENT_DESKTOP_WINDOW_COMMAND,
+            .code = 'A',
+            .data1 = package,
+        },
+    };
+    if (!SDL_PushEvent(&event)) {
+        free(package);
+        report_app_unavailable();
+    }
+}
+
+// Returns false when the quit command has stopped the input timer.
+static bool
+process_input_byte(uint8_t byte) {
+    switch (input_state) {
+        case SC_DESKTOP_INPUT_APP_LENGTH:
+            if (!byte) {
+                input_state = SC_DESKTOP_INPUT_COMMAND;
+                report_app_unavailable();
+            } else {
+                app_payload_length = byte;
+                app_payload_received = 0;
+                input_state = SC_DESKTOP_INPUT_APP_PAYLOAD;
+            }
+            return true;
+        case SC_DESKTOP_INPUT_APP_PAYLOAD:
+            app_payload[app_payload_received++] = (char) byte;
+            if (app_payload_received == app_payload_length) {
+                input_state = SC_DESKTOP_INPUT_COMMAND;
+                push_app_command();
+            }
+            return true;
+        case SC_DESKTOP_INPUT_COMMAND:
+            break;
+    }
+
+    if (byte == 'Q') {
+        sc_push_event(SDL_EVENT_QUIT);
+        return false;
+    }
+    if (byte == 'A') {
+        input_state = SC_DESKTOP_INPUT_APP_LENGTH;
+        return true;
+    }
+    if (byte && strchr("FWZLRPUTt+-01NSCDVYyIi", byte)) {
+        SDL_Event event = {
+            .user = {.type = SC_EVENT_DESKTOP_WINDOW_COMMAND, .code = byte},
+        };
+        SDL_PushEvent(&event);
+    }
+    return true;
+}
 
 // Only this timer reads stdin. Bounded non-blocking reads also make shutdown
 // safe when the desktop disappears without sending the quit byte.
@@ -55,17 +170,13 @@ read_commands(void *userdata, SDL_TimerID timer_id, Uint32 interval) {
     }
     count = (int) read(STDIN_FILENO, bytes, sizeof(bytes));
 #endif
-    if (!count || (count > 0 && memchr(bytes, 'Q', (size_t) count))) {
+    if (count <= 0) {
         sc_push_event(SDL_EVENT_QUIT);
         return 0;
     }
     for (int i = 0; i < count; ++i) {
-        if (bytes[i] && strchr("FWZLRPUTt+-01NSCDVYyIi", bytes[i])) {
-            SDL_Event event = {
-                .user = {.type = SC_EVENT_DESKTOP_WINDOW_COMMAND,
-                         .code = bytes[i]},
-            };
-            SDL_PushEvent(&event);
+        if (!process_input_byte((uint8_t) bytes[i])) {
+            return 0;
         }
     }
     return interval;
@@ -90,11 +201,23 @@ sc_desktop_bridge_start(void) {
     frame_reported = false;
     camera_controls_reported = false;
     android_controls_reported = false;
+    app_controls_reported = false;
     clipboard_controls_reported = false;
     clipboard_copy_pending = false;
     fps_controls_reported = false;
+    input_state = SC_DESKTOP_INPUT_COMMAND;
+    app_payload_length = 0;
+    app_payload_received = 0;
     input_timer = SDL_AddTimer(50, read_commands, NULL);
     sc_desktop_bridge_report(input_timer ? "bridge-ready" : "bridge-error");
+}
+
+void
+sc_desktop_bridge_app_controls_ready(void) {
+    if (!app_controls_reported) {
+        app_controls_reported = true;
+        sc_desktop_bridge_report("app-controls-ready");
+    }
 }
 
 void
@@ -173,4 +296,5 @@ sc_desktop_bridge_stop(void) {
         input_timer = 0;
     }
     clipboard_copy_pending = false;
+    input_state = SC_DESKTOP_INPUT_COMMAND;
 }

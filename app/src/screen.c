@@ -838,6 +838,15 @@ sc_screen_destroy(struct sc_screen *screen) {
         struct sc_size * size = event.user.data1;
         free(size);
     }
+
+    while (sc_dequeue_event(SC_EVENT_DESKTOP_WINDOW_COMMAND, &event)) {
+        assert(event.type == SC_EVENT_DESKTOP_WINDOW_COMMAND);
+        if (event.user.code == 'A') {
+            // A framed app request owns its package until the SDL thread
+            // handles the event. Free it if shutdown wins the race.
+            free(event.user.data1);
+        }
+    }
 }
 
 static void
@@ -958,6 +967,7 @@ sc_screen_apply_frame(struct sc_screen *screen, bool can_resize) {
     sc_desktop_bridge_fps_controls_ready();
     if (screen->controller && !screen->camera) {
         sc_desktop_bridge_android_controls_ready();
+        sc_desktop_bridge_app_controls_ready();
         if (screen->im.kp) {
             sc_desktop_bridge_clipboard_controls_ready();
         }
@@ -1149,6 +1159,19 @@ sc_screen_handle_event(struct sc_screen *screen, const SDL_Event *event) {
     switch (event->type) {
         case SC_EVENT_DESKTOP_WINDOW_COMMAND: {
             char command = (char) event->user.code;
+            if (command == 'A') {
+                char *package = event->user.data1;
+                bool available = screen->controller && !screen->camera
+                              && !screen->disconnected;
+                bool handled = available
+                    && sc_input_manager_desktop_start_app(&screen->im,
+                                                          package);
+                free(package);
+                sc_desktop_bridge_report(
+                    handled ? "app-result:A:handled"
+                            : "app-result:A:unavailable");
+                return;
+            }
             bool fps_command = command == 'I' || command == 'i';
             if (fps_command) {
                 bool available = screen->video && screen->window_shown

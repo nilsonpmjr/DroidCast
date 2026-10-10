@@ -13,6 +13,7 @@ class Window : public QMainWindow {
   Q_OBJECT
 public:
   explicit Window(QWidget *parent = nullptr);
+  ~Window() override;
   void showPage(int index);
 
 protected:
@@ -27,15 +28,16 @@ private:
   QStackedWidget *pages;
   QLabel *notice, *deviceHelp, *sessionStatus, *runtimeStatus, *deviceCount,
       *sessionDetail, *captureDirectory;
-  QLabel *headerStatus, *sessionTime;
+  QLabel *headerStatus, *sessionTime, *appLaunchFeedback;
   QWidget *welcome;
   QPushButton *startButton, *recordButton, *stopButton, *refreshButton,
-      *screenshotButton, *apkButton, *sessionStop;
+      *screenshotButton, *apkButton, *sessionStop, *appLaunchButton;
   QPlainTextEdit *logs;
   QComboBox *captureFilter,
-      *cameraIdSelector = nullptr, *cameraSizeSelector = nullptr,
-      *cameraFpsSelector = nullptr, *displaySelector = nullptr,
-      *videoEncoderSelector = nullptr, *appSelector = nullptr;
+      *sessionAppSelector = nullptr, *cameraIdSelector = nullptr,
+      *cameraSizeSelector = nullptr, *cameraFpsSelector = nullptr,
+      *displaySelector = nullptr, *videoEncoderSelector = nullptr,
+      *appSelector = nullptr;
   QString fingerprint, cameraCapabilitySerial, deviceCapabilitySerial,
       appCapabilitySerial;
   QList<CameraCapability> cameraCapabilities;

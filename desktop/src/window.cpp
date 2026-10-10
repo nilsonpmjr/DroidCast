@@ -200,6 +200,9 @@ Window::Window(QWidget *parent) : QMainWindow(parent) {
       elapsed.invalidate();
       updateCaptures();
     }
+    if (!engine.running() ||
+        engine.sessionState() == Engine::SessionState::Starting)
+      updateAppSelector();
     updateActions();
     if (closing && !engine.running())
       QTimer::singleShot(0, this, &QWidget::close);
@@ -223,6 +226,14 @@ Window::Window(QWidget *parent) : QMainWindow(parent) {
   updateCaptures();
   QTimer::singleShot(0, &engine, &Engine::refresh);
 }
+
+Window::~Window() {
+  // Engine::~Engine() may synchronously wait for a child and receive its final
+  // signals. Window data members are destroyed before engine, so disconnect
+  // while every slot dependency is still alive.
+  disconnect(&engine, nullptr, this, nullptr);
+}
+
 void Window::showPage(int index) {
   if (index >= 0 && index < pages->count())
     navigation->setCurrentRow(index);
@@ -586,6 +597,51 @@ QWidget *Window::sessionPage() {
   session->addWidget(sessionStop);
   connect(sessionStop, &QPushButton::clicked, &engine, &Engine::stop);
   controls->addWidget(sessionCard);
+  QVBoxLayout *launchApp;
+  auto *launchAppCard = card(launchApp);
+  launchApp->addWidget(label("Launch application", "section"));
+  launchApp->addWidget(label(
+      "Choose an app inspected for this phone. DroidCast asks Android to "
+      "launch it on the display being mirrored; it does not force-stop it.",
+      "muted"));
+  sessionAppSelector = new QComboBox;
+  sessionAppSelector->setObjectName("sessionAppSelector");
+  sessionAppSelector->setAccessibleName("Application to launch");
+  sessionAppSelector->setEditable(true);
+  sessionAppSelector->setInsertPolicy(QComboBox::NoInsert);
+  sessionAppSelector->setSizeAdjustPolicy(
+      QComboBox::AdjustToMinimumContentsLengthWithIcon);
+  sessionAppSelector->setMinimumContentsLength(18);
+  sessionAppSelector->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
+  sessionAppSelector->completer()->setCaseSensitivity(Qt::CaseInsensitive);
+  sessionAppSelector->completer()->setFilterMode(Qt::MatchContains);
+  launchApp->addWidget(sessionAppSelector);
+  appLaunchButton =
+      button("Launch on mirrored display", "phone", "launchSessionApp");
+  appLaunchButton->setAccessibleName("Launch selected Android application");
+  launchApp->addWidget(appLaunchButton);
+  appLaunchFeedback =
+      label("Inspect installed apps before starting a session.", "muted");
+  appLaunchFeedback->setObjectName("appLaunchFeedback");
+  launchApp->addWidget(appLaunchFeedback);
+  connect(sessionAppSelector, &QComboBox::editTextChanged, this,
+          [this] { updateActions(); });
+  connect(appLaunchButton, &QPushButton::clicked, this, [this] {
+    const int index = sessionAppSelector->findText(
+        sessionAppSelector->currentText(), Qt::MatchFixedString);
+    engine.launchApp(index > 0 ? sessionAppSelector->itemData(index).toString()
+                               : QString{});
+  });
+  connect(&engine, &Engine::appLaunchMessage, appLaunchFeedback,
+          &QLabel::setText);
+  connect(&engine, &Engine::appLaunchControlsChanged, this,
+          &Window::updateActions);
+  connect(&engine, &Engine::sessionChanged, this, [this] {
+    if (!engine.running())
+      appLaunchFeedback->setText(
+          "Inspect installed apps before starting a session.");
+  });
+  controls->addWidget(launchAppCard);
   QVBoxLayout *install;
   auto *installCard = card(install);
   install->addWidget(label("Install application", "section"));
@@ -1421,28 +1477,52 @@ void Window::setAppCapabilities(const QString &serial, const QString &report) {
   updateAppSelector();
 }
 void Window::updateAppSelector() {
-  if (!appSelector)
+  if (!appSelector && !sessionAppSelector)
     return;
-  const QSignalBlocker blocker(appSelector);
   const auto selectedPackage =
       engine.preferences.options.value("start-app").toString().trimmed();
-  appSelector->clear();
-  appSelector->addItem(appCapabilities.isEmpty()
-                           ? "Inspect phone to discover applications"
-                           : "Search installed applications",
-                       QString{});
-  for (const auto &app : appCapabilities) {
-    const auto system = app.system ? " (system)" : QString{};
-    appSelector->addItem(app.name + " (" + app.package + ")" + system,
-                         app.package);
+  if (appSelector) {
+    const QSignalBlocker blocker(appSelector);
+    appSelector->clear();
+    appSelector->addItem(appCapabilities.isEmpty()
+                             ? "Inspect phone to discover applications"
+                             : "Search installed applications",
+                         QString{});
+    for (const auto &app : appCapabilities) {
+      const auto system = app.system ? " (system)" : QString{};
+      appSelector->addItem(app.name + " (" + app.package + ")" + system,
+                           app.package);
+    }
+    appSelector->setCurrentIndex(
+        qMax(0, appSelector->findData(selectedPackage)));
+    const bool virtualDisplay =
+        engine.preferences.options.value("virtual-display", false).toBool();
+    const bool readOnly =
+        engine.preferences.options.value("no-control", false).toBool();
+    appSelector->setEnabled(!engine.running() && virtualDisplay && !readOnly &&
+                            !appCapabilities.isEmpty());
   }
-  appSelector->setCurrentIndex(qMax(0, appSelector->findData(selectedPackage)));
-  const bool virtualDisplay =
-      engine.preferences.options.value("virtual-display", false).toBool();
-  const bool readOnly =
-      engine.preferences.options.value("no-control", false).toBool();
-  appSelector->setEnabled(virtualDisplay && !readOnly &&
-                          !appCapabilities.isEmpty());
+  if (sessionAppSelector) {
+    const QSignalBlocker blocker(sessionAppSelector);
+    const auto previous = sessionAppSelector->currentData().toString();
+    const auto target =
+        engine.running() ? engine.activeSerial : selectedSerial();
+    const bool matchingTarget =
+        !target.isEmpty() && target == appCapabilitySerial;
+    sessionAppSelector->clear();
+    sessionAppSelector->addItem(matchingTarget && !appCapabilities.isEmpty()
+                                    ? "Search inspected applications"
+                                    : "Inspect apps before starting a session",
+                                QString{});
+    if (matchingTarget)
+      for (const auto &app : appCapabilities) {
+        const auto system = app.system ? " (system)" : QString{};
+        sessionAppSelector->addItem(
+            app.name + " (" + app.package + ")" + system, app.package);
+      }
+    sessionAppSelector->setCurrentIndex(
+        qMax(0, sessionAppSelector->findData(previous)));
+  }
 }
 void Window::savePreferences() {
   engine.preferences.save(settings);
@@ -1556,6 +1636,9 @@ QString Window::selectedSerial() const {
              : QString{};
 }
 void Window::updateActions() {
+  const bool running = engine.running();
+  const auto capabilityTarget =
+      running ? engine.activeSerial : selectedSerial();
   if (!cameraCapabilitySerial.isEmpty() &&
       cameraCapabilitySerial != selectedSerial()) {
     cameraCapabilitySerial.clear();
@@ -1570,7 +1653,7 @@ void Window::updateActions() {
     updateDeviceCapabilitySelectors();
   }
   if (!appCapabilitySerial.isEmpty() &&
-      appCapabilitySerial != selectedSerial()) {
+      appCapabilitySerial != capabilityTarget) {
     appCapabilitySerial.clear();
     appCapabilities.clear();
     updateAppSelector();
@@ -1578,7 +1661,6 @@ void Window::updateActions() {
   auto *item = deviceList->currentItem();
   const auto state = item ? item->data(Qt::UserRole + 1).toString() : QString{};
   const bool ready = state == "device";
-  const bool running = engine.running();
   startButton->setEnabled(ready && !running && !engine.inspecting());
   recordButton->setEnabled(startButton->isEnabled());
   stopButton->setEnabled(running && engine.sessionState() !=
@@ -1594,6 +1676,17 @@ void Window::updateActions() {
       deviceAvailable &&
       engine.captureAllowed(running ? engine.activeSerial : selectedSerial()));
   apkButton->setEnabled(deviceAvailable && engine.controlAllowed());
+  if (sessionAppSelector && appLaunchButton) {
+    const bool targetApps = running &&
+                            appCapabilitySerial == engine.activeSerial &&
+                            sessionAppSelector->count() > 1;
+    sessionAppSelector->setEnabled(targetApps && engine.appLaunchAvailable());
+    const int exact = sessionAppSelector->findText(
+        sessionAppSelector->currentText(), Qt::MatchFixedString);
+    appLaunchButton->setEnabled(
+        sessionAppSelector->isEnabled() && exact > 0 &&
+        !sessionAppSelector->itemData(exact).toString().isEmpty());
+  }
   for (auto *control : findChildren<QPushButton *>())
     if (control->property("phoneControl").toBool())
       control->setEnabled(screenshotButton->isEnabled() &&

@@ -431,7 +431,7 @@ QString textOptionError(const QString &key, const QString &value) {
   } else if (key == "start-app") {
     static const QRegularExpression pattern(
         "\\A[A-Za-z][A-Za-z0-9_]*(?:\\.[A-Za-z][A-Za-z0-9_]*)*\\z");
-    if (value.size() > 256 || !pattern.match(value).hasMatch())
+    if (value.toUtf8().size() > 255 || !pattern.match(value).hasMatch())
       return "Enter an exact Android package name such as "
              "com.android.settings, without spaces, search prefixes or "
              "force-stop prefixes.";
@@ -900,6 +900,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
     const bool clipboardCommand =
         QByteArray("Yy").contains(pendingBridgeCommand);
     const bool fpsCommand = QByteArray("Ii").contains(pendingBridgeCommand);
+    const bool appCommand = pendingBridgeCommand == 'A';
     pendingBridgeCommand = 0;
     if (cameraCommand) {
       cameraCommandsHealthy = false;
@@ -922,6 +923,11 @@ Engine::Engine(QObject *parent) : QObject(parent) {
       emit fpsControlMessage(
           "No FPS confirmation arrived. Restart the session to re-enable "
           "measurement controls; no request was retried.");
+    } else if (appCommand) {
+      appCommandsHealthy = false;
+      emit appLaunchMessage(
+          "No app-launch confirmation arrived. Restart the session to "
+          "re-enable launching; no request was retried.");
     } else {
       windowCommandsHealthy = false;
       emit windowControlMessage(
@@ -933,6 +939,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
     emit androidControlsChanged();
     emit clipboardControlsChanged();
     emit fpsControlsChanged();
+    emit appLaunchControlsChanged();
   });
   scanTimeout.setSingleShot(true);
   wirelessTimeout.setSingleShot(true);
@@ -1046,6 +1053,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
                             : "Session ended. You can start another mirror.");
             stopping = false;
             emit fpsControlsChanged();
+            emit appLaunchControlsChanged();
             emit sessionChanged();
           });
   wireless.setProcessChannelMode(QProcess::MergedChannels);
@@ -1289,6 +1297,8 @@ bool Engine::start(const QString &serial, const QString &recording) {
   fpsCommandsReady = false;
   fpsCommandsHealthy = true;
   fpsMeasurementActive = false;
+  appCommandsReady = false;
+  appCommandsHealthy = true;
   pendingBridgeCommand = 0;
   emit windowControlMessage(
       "Window controls become available after the first video frame.");
@@ -1309,6 +1319,11 @@ bool Engine::start(const QString &serial, const QString &recording) {
           : "Clipboard actions become available after the first frame.");
   emit fpsControlMessage(
       "Rendered FPS measurement becomes available after the first frame.");
+  emit appLaunchMessage(
+      activeCamera ? "App launch is unavailable during camera capture."
+      : activeReadOnly
+          ? "App launch is disabled in read-only mode."
+          : "App launch becomes available after the first display frame.");
   forcedStop = bridgeReady = recordingFinalized = recordingFailed = false;
   mirrorOutput.clear();
   sessionToken = QUuid::createUuid().toString(QUuid::Id128).toLatin1();
@@ -1330,6 +1345,7 @@ void Engine::stop() {
   pendingBridgeCommand = 0;
   fpsMeasurementActive = false;
   emit fpsControlsChanged();
+  emit appLaunchControlsChanged();
   state = SessionState::Stopping;
   emit message("Stopping session and finishing any recording…");
   // The fork handles this on its SDL event loop, following window-close
@@ -1392,6 +1408,14 @@ void Engine::readMirrorOutput() {
           "Rendered FPS measurement ready. This is not latency or the "
           "configured capture limit.");
       emit fpsControlsChanged();
+    } else if (event == "app-controls-ready" && bridgeReady && !activeCamera) {
+      appCommandsReady = true;
+      emit appLaunchMessage(
+          activeReadOnly
+              ? "App launch is disabled in read-only mode."
+              : "App launch ready. Choose an application inspected for this "
+                "phone.");
+      emit appLaunchControlsChanged();
     } else if ((event == "fps-state:started" || event == "fps-state:stopped") &&
                bridgeReady) {
       fpsMeasurementActive = event.endsWith(":started");
@@ -1448,6 +1472,7 @@ void Engine::readMirrorOutput() {
         emit androidControlsChanged();
         emit clipboardControlsChanged();
         emit fpsControlsChanged();
+        emit appLaunchControlsChanged();
       }
     } else if (event.startsWith("camera-result:") && bridgeReady &&
                pendingBridgeCommand) {
@@ -1471,6 +1496,7 @@ void Engine::readMirrorOutput() {
         emit androidControlsChanged();
         emit clipboardControlsChanged();
         emit fpsControlsChanged();
+        emit appLaunchControlsChanged();
       }
     } else if (event.startsWith("android-result:") && bridgeReady &&
                pendingBridgeCommand) {
@@ -1516,6 +1542,7 @@ void Engine::readMirrorOutput() {
         emit cameraControlsChanged();
         emit clipboardControlsChanged();
         emit fpsControlsChanged();
+        emit appLaunchControlsChanged();
       }
     } else if (event.startsWith("clipboard-result:") && bridgeReady &&
                pendingBridgeCommand) {
@@ -1538,6 +1565,7 @@ void Engine::readMirrorOutput() {
         emit cameraControlsChanged();
         emit androidControlsChanged();
         emit fpsControlsChanged();
+        emit appLaunchControlsChanged();
       }
     } else if (event.startsWith("fps-result:") && bridgeReady &&
                pendingBridgeCommand) {
@@ -1559,6 +1587,7 @@ void Engine::readMirrorOutput() {
         emit cameraControlsChanged();
         emit androidControlsChanged();
         emit clipboardControlsChanged();
+        emit appLaunchControlsChanged();
       }
     } else if (event.startsWith("fps-sample:") && bridgeReady &&
                fpsMeasurementActive) {
@@ -1572,6 +1601,24 @@ void Engine::readMirrorOutput() {
             rendered + " rendered fps" +
             (skipped ? " · " + QString::number(skipped) + " skipped frame(s)"
                      : QString{}));
+      }
+    } else if (event.startsWith("app-result:") && bridgeReady &&
+               pendingBridgeCommand == 'A') {
+      if (event == "app-result:A:handled" ||
+          event == "app-result:A:unavailable") {
+        bridgeCommandTimeout.stop();
+        const bool handled = event.endsWith(":handled");
+        pendingBridgeCommand = 0;
+        emit appLaunchMessage(
+            handled ? "App launch request queued for the mirrored display."
+                    : "This app launch is unavailable for the current "
+                      "session.");
+        emit appLaunchControlsChanged();
+        emit windowControlsChanged();
+        emit cameraControlsChanged();
+        emit androidControlsChanged();
+        emit clipboardControlsChanged();
+        emit fpsControlsChanged();
       }
     } else if (event == "recording-finalized" && bridgeReady)
       recordingFinalized = true;
@@ -1641,6 +1688,7 @@ void Engine::windowAction(WindowAction action) {
   emit androidControlsChanged();
   emit clipboardControlsChanged();
   emit fpsControlsChanged();
+  emit appLaunchControlsChanged();
 }
 
 bool Engine::cameraControlsAvailable() const {
@@ -1690,6 +1738,7 @@ void Engine::cameraAction(CameraAction action) {
   emit androidControlsChanged();
   emit clipboardControlsChanged();
   emit fpsControlsChanged();
+  emit appLaunchControlsChanged();
 }
 
 bool Engine::androidControlsAvailable() const {
@@ -1750,6 +1799,7 @@ void Engine::androidAction(AndroidAction action) {
   emit cameraControlsChanged();
   emit clipboardControlsChanged();
   emit fpsControlsChanged();
+  emit appLaunchControlsChanged();
 }
 
 bool Engine::clipboardControlsAvailable() const {
@@ -1787,6 +1837,7 @@ void Engine::clipboardAction(ClipboardAction action) {
   emit cameraControlsChanged();
   emit androidControlsChanged();
   emit fpsControlsChanged();
+  emit appLaunchControlsChanged();
 }
 
 bool Engine::fpsControlsAvailable() const {
@@ -1817,6 +1868,54 @@ void Engine::fpsAction(FpsAction action) {
   emit cameraControlsChanged();
   emit androidControlsChanged();
   emit clipboardControlsChanged();
+  emit appLaunchControlsChanged();
+}
+
+bool Engine::appLaunchAvailable() const {
+  return running() && state == SessionState::Streaming && !activeCamera &&
+         !activeReadOnly && appCommandsReady && appCommandsHealthy &&
+         !pendingBridgeCommand;
+}
+
+void Engine::launchApp(const QString &package) {
+  const auto value = package.trimmed();
+  if (value.isEmpty() || !textOptionError("start-app", value).isEmpty()) {
+    emit appLaunchMessage(
+        "Choose an inspected exact package; no launch request was sent.");
+    return;
+  }
+  if (!appLaunchAvailable()) {
+    emit appLaunchMessage(
+        activeCamera     ? "App launch is unavailable during camera capture."
+        : activeReadOnly ? "App launch is disabled in read-only mode."
+                         : "App launch is waiting for the display stream or "
+                           "another bridge request.");
+    return;
+  }
+
+  const auto payload = value.toUtf8();
+  QByteArray frame;
+  frame.reserve(payload.size() + 2);
+  frame.append('A');
+  frame.append(static_cast<char>(payload.size()));
+  frame.append(payload);
+  pendingBridgeCommand = 'A';
+  if (mirror.write(frame) != frame.size()) {
+    pendingBridgeCommand = 0;
+    appCommandsHealthy = false;
+    emit appLaunchMessage(
+        "Could not send the app-launch request. Restart the session.");
+  } else {
+    bridgeCommandTimeout.start(2000);
+    emit appLaunchMessage(
+        "Waiting for the mirror to queue the app-launch request…");
+  }
+  emit appLaunchControlsChanged();
+  emit windowControlsChanged();
+  emit cameraControlsChanged();
+  emit androidControlsChanged();
+  emit clipboardControlsChanged();
+  emit fpsControlsChanged();
 }
 
 void Engine::connectWireless(const QString &endpoint, const QString &code) {

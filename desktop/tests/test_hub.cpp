@@ -547,6 +547,92 @@ private slots:
     QTRY_VERIFY(start->isEnabled());
     bundledPreferences().save(settings);
   }
+  void appLaunchUsesExactPackageAndMirroredDisplay() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy feedback(&engine, &Engine::appLaunchMessage);
+    QVERIFY(!engine.appLaunchAvailable());
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.appLaunchAvailable());
+    engine.launchApp("com.Qtest.App");
+    QTRY_VERIFY(feedback.last().first().toString().contains("queued"));
+    QVERIFY(engine.appLaunchAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    engine.preferences.options["virtual-display"] = true;
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.appLaunchAvailable());
+    QVERIFY(engine.usesAlternateDisplay());
+    engine.launchApp("com.example.calculator");
+    QTRY_VERIFY(
+        feedback.last().first().toString().contains("mirrored display"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+  }
+  void appLaunchRejectsUnsafeModesTimeoutAndOldEngine() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy feedback(&engine, &Engine::appLaunchMessage);
+
+    engine.launchApp("com.example.calculator;rm");
+    QVERIFY(feedback.last().first().toString().contains("exact package"));
+    engine.launchApp("");
+    QVERIFY(feedback.last().first().toString().contains("exact package"));
+    const auto maxPackage = QString(255, 'a');
+    QVERIFY(textOptionError("start-app", maxPackage).isEmpty());
+    QVERIFY(!textOptionError("start-app", maxPackage + 'a').isEmpty());
+
+    engine.preferences.options["no-control"] = true;
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    QVERIFY(!engine.appLaunchAvailable());
+    engine.launchApp("com.example.calculator");
+    QVERIFY(feedback.last().first().toString().contains("read-only"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    engine.preferences.options["no-control"] = false;
+    engine.preferences.options["video-source"] = "camera";
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    QVERIFY(!engine.appLaunchAvailable());
+    engine.launchApp("com.example.calculator");
+    QVERIFY(feedback.last().first().toString().contains("camera"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    engine.preferences.options["video-source"] = "display";
+    qputenv("HUB_TEST_MODE", "app-unavailable");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.appLaunchAvailable());
+    engine.launchApp("com.example.calculator");
+    QTRY_VERIFY(feedback.last().first().toString().contains("unavailable"));
+    QVERIFY(engine.appLaunchAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    qputenv("HUB_TEST_MODE", "app-timeout");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY(engine.appLaunchAvailable());
+    engine.launchApp("com.example.calculator");
+    QTRY_VERIFY_WITH_TIMEOUT(
+        feedback.last().first().toString().contains("No app-launch"), 4000);
+    QVERIFY(!engine.appLaunchAvailable());
+    QVERIFY(engine.windowControlsAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    qputenv("HUB_TEST_MODE", "old-app-bridge");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    QVERIFY(engine.windowControlsAvailable());
+    QVERIFY(!engine.appLaunchAvailable());
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+  }
   void cameraSessionPanelIsContextualAndActionable() {
     QSettings settings;
     auto prefs = bundledPreferences();
@@ -967,6 +1053,52 @@ private slots:
     window.findChild<QListWidget *>("devices")->setCurrentRow(1);
     QCOMPARE(picker->count(), 1);
     QVERIFY(!picker->isEnabled());
+    bundledPreferences().save(settings);
+  }
+  void liveAppPickerLaunchesOnlyAnInspectedSelection() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(5);
+    window.findChild<QComboBox *>("settingsCategory")
+        ->setCurrentText("Virtual display");
+    auto *inspect = window.findChild<QPushButton *>("inspectApps");
+    QTRY_VERIFY(inspect->isEnabled());
+    inspect->click();
+    auto *settingsPicker = window.findChild<QComboBox *>("detectedApp");
+    QTRY_COMPARE(settingsPicker->count(), 4);
+
+    window.showPage(1);
+    auto *picker = window.findChild<QComboBox *>("sessionAppSelector");
+    auto *launch = window.findChild<QPushButton *>("launchSessionApp");
+    auto *feedback = window.findChild<QLabel *>("appLaunchFeedback");
+    QVERIFY(picker && launch && feedback);
+    QVERIFY(picker->isEditable());
+    QCOMPARE(picker->completer()->filterMode(), Qt::MatchContains);
+    QCOMPARE(picker->count(), 4);
+    QVERIFY(!launch->isEnabled());
+
+    window.findChild<QPushButton *>("startMirror")->click();
+    QTRY_VERIFY(picker->isEnabled());
+    const int calculator = picker->findData("com.example.calculator");
+    QVERIFY(calculator > 0);
+    picker->setEditText("calculator");
+    QVERIFY(!launch->isEnabled());
+    picker->setCurrentIndex(calculator);
+    QTRY_VERIFY(launch->isEnabled());
+    launch->click();
+    QTRY_VERIFY(feedback->text().contains("queued"));
+
+    window.findChild<QListWidget *>("devices")->setCurrentRow(1);
+    QCOMPARE(picker->count(), 4);
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    window.findChild<QPushButton *>("stopMirror")->click();
+    QTRY_VERIFY(feedback->text().contains("Inspect installed apps"));
     bundledPreferences().save(settings);
   }
   void advancedVideoValidationAndArguments() {

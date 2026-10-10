@@ -373,6 +373,29 @@ sc_input_manager_desktop_clipboard_copy(struct sc_input_manager *im) {
 }
 
 bool
+sc_input_manager_desktop_start_app(struct sc_input_manager *im,
+                                   const char *package) {
+    if (!im->controller || im->camera) {
+        return false;
+    }
+    char *name = strdup(package);
+    if (!name) {
+        LOG_OOM();
+        return false;
+    }
+    struct sc_control_msg msg = {
+        .type = SC_CONTROL_MSG_TYPE_START_APP,
+        .start_app = {.name = name},
+    };
+    if (!sc_controller_push_msg(im->controller, &msg)) {
+        free(name);
+        LOGW("Could not queue DroidCast app launch");
+        return false;
+    }
+    return true;
+}
+
+bool
 sc_input_manager_desktop_clipboard_paste(struct sc_input_manager *im) {
     if (!im->controller || !im->kp || im->camera) {
         return false;

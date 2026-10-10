@@ -102,4 +102,8 @@ sc_input_manager_desktop_clipboard_copy(struct sc_input_manager *im);
 bool
 sc_input_manager_desktop_clipboard_paste(struct sc_input_manager *im);
 
+bool
+sc_input_manager_desktop_start_app(struct sc_input_manager *im,
+                                   const char *package);
+
 #endif

@@ -126,6 +126,8 @@ public:
   void fpsAction(FpsAction action);
   bool fpsControlsAvailable() const;
   bool fpsMeasuring() const { return fpsMeasurementActive; }
+  void launchApp(const QString &package);
+  bool appLaunchAvailable() const;
   enum class SessionState {
     Idle,
     Starting,
@@ -165,6 +167,8 @@ signals:
   void clipboardControlMessage(const QString &text);
   void fpsControlsChanged();
   void fpsControlMessage(const QString &text);
+  void appLaunchControlsChanged();
+  void appLaunchMessage(const QString &text);
   void captureSaved(const QString &path);
   void message(const QString &text);
   void log(const QString &text);
@@ -196,6 +200,7 @@ private:
   bool clipboardCommandsReady = false, clipboardCommandsHealthy = true;
   bool fpsCommandsReady = false, fpsCommandsHealthy = true,
        fpsMeasurementActive = false;
+  bool appCommandsReady = false, appCommandsHealthy = true;
   char pendingBridgeCommand = 0;
   void readMirrorOutput();
   QByteArray scanOutput, wirelessOutput, pairingInput;

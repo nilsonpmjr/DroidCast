@@ -10,6 +10,40 @@
 #include <unistd.h>
 #endif
 
+static bool readAvailableInput(char *byte) {
+#ifdef Q_OS_WIN
+  DWORD available, received;
+  HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+  return PeekNamedPipe(input, nullptr, 0, nullptr, &available, nullptr) &&
+         available && ReadFile(input, byte, 1, &received, nullptr) &&
+         received == 1;
+#else
+  struct pollfd input = {STDIN_FILENO, POLLIN, 0};
+  return poll(&input, 1, 0) > 0 && read(STDIN_FILENO, byte, 1) == 1;
+#endif
+}
+
+static bool readExactInput(char *data, qsizetype size) {
+  qsizetype receivedTotal = 0;
+  while (receivedTotal < size) {
+#ifdef Q_OS_WIN
+    DWORD received;
+    if (!ReadFile(GetStdHandle(STD_INPUT_HANDLE), data + receivedTotal,
+                  static_cast<DWORD>(size - receivedTotal), &received,
+                  nullptr) ||
+        !received)
+      return false;
+#else
+    const auto received =
+        read(STDIN_FILENO, data + receivedTotal, size - receivedTotal);
+    if (received <= 0)
+      return false;
+#endif
+    receivedTotal += received;
+  }
+  return true;
+}
+
 int main(int argc, char **argv) {
   QCoreApplication app(argc, argv);
   const auto args = app.arguments();
@@ -114,10 +148,13 @@ int main(int argc, char **argv) {
         if (mode != "old-fps-bridge")
           report("fps-controls-ready");
         if (!args.contains("--video-source=camera") &&
-            !args.contains("--no-control") && mode != "old-android-bridge") {
-          report("android-controls-ready");
+            !args.contains("--no-control")) {
+          if (mode != "old-android-bridge")
+            report("android-controls-ready");
           if (mode != "old-clipboard-bridge")
             report("clipboard-controls-ready");
+          if (mode != "old-app-bridge")
+            report("app-controls-ready");
         } else if (args.contains("--video-source=camera") &&
                    !args.contains("--no-control") &&
                    mode != "old-camera-bridge")
@@ -134,18 +171,24 @@ int main(int argc, char **argv) {
     if (mode == "ignore-quit")
       return;
     char command;
-#ifdef Q_OS_WIN
-    DWORD available, received;
-    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
-    if (!PeekNamedPipe(input, nullptr, 0, nullptr, &available, nullptr) ||
-        !available)
+    if (!readAvailableInput(&command))
       return;
-    if (!ReadFile(input, &command, 1, &received, nullptr) || received != 1)
+    if (command == 'A') {
+      unsigned char length;
+      if (!readExactInput(reinterpret_cast<char *>(&length), 1) || !length)
+        return;
+      QByteArray package(length, Qt::Uninitialized);
+      if (!readExactInput(package.data(), package.size()))
+        return;
+      const bool knownPackage =
+          package == "com.example.calculator" || package == "com.Qtest.App";
+      if (mode != "app-timeout")
+        report(QString("app-result:A:%1")
+                   .arg(mode == "app-unavailable" || !knownPackage
+                            ? "unavailable"
+                            : "handled"));
       return;
-#else
-    struct pollfd input = {STDIN_FILENO, POLLIN, 0};
-    if (poll(&input, 1, 0) <= 0 || read(STDIN_FILENO, &command, 1) != 1) return;
-#endif
+    }
     if (QByteArray("FWZLRPU").contains(command)) {
       if (mode != "window-timeout")
         report(QString("window-result:%1:%2")

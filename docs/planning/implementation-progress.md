@@ -325,3 +325,26 @@ device compatibility testing remain open.
   unavailable and timeout outcomes, old engines, read-only and camera sessions,
   accessible labels and the 920×680 no-horizontal-scroll contract. Real-device
   comparison with scrcpy's log and cross-platform behavior remain release-proof work.
+
+## Part 17: inspected-app launch during a live session
+
+- Added a searchable active-session picker backed by the existing target-scoped app
+  inspection. Only an exact selected row can be launched; partial or manually typed
+  search text never becomes a request.
+- Added a length-prefixed private-bridge frame for an exact ASCII package of at most
+  255 bytes. The parser survives fragmented reads, treats command bytes inside the
+  payload as data and rejects invalid package grammar before allocating an SDL event.
+- Routed accepted packages through scrcpy's existing `START_APP` control message.
+  No shell or ADB command is composed, no force-stop prefix is supported, and the
+  Android server targets the display currently being captured, including virtual or
+  selected secondary displays.
+- Capability, queue result, timeout and old-engine states use the shared one-request
+  bridge slot. Camera and read-only sessions stay disabled. Feedback says “queued”
+  rather than claiming Android brought an activity to the foreground.
+- Kept the inspected list pinned to the active session serial even if the idle device
+  selection changes. Long labels remain searchable without widening the 920×680
+  workspace. Package inventories are not copied into Diagnostics.
+- Tests cover fragmented payloads containing `Q`, hostile and oversized packages,
+  primary and virtual displays, unavailable/timeout/old-engine paths, mode gates,
+  exact UI selection and layout. An AddressSanitizer pass also exposed and verified
+  a Window/Engine teardown fix for final child-process signals.
