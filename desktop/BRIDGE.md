@@ -12,7 +12,8 @@ their normal stdin behavior. The desktop generates a new token per launch.
   shell commands or synthesized keyboard shortcuts. Unknown bytes are ignored;
   `Q` is reserved as the quit command outside a framed payload.
 - Child → parent stdout: `DROIDCAST/1 <token> <event>\n`.
-- Events: `bridge-ready`, `bridge-error`, `first-frame`, `recording-finalized`,
+- Events: `bridge-ready`, `bridge-error`, `audio-lifecycle-ready`,
+  `first-frame`, `first-audio-packet`, `recording-finalized`,
   `recording-error`, `ended`, `disconnected`, `failed`.
 - Window events: `window-controls-ready` and
   `window-result:<byte>:handled` / `window-result:<byte>:unavailable`.
@@ -30,6 +31,11 @@ their normal stdin behavior. The desktop generates a new token per launch.
   `app-result:A:handled` / `app-result:A:unavailable`.
 - `first-frame` is emitted once, after uploading and rendering a video frame.
   Starting a process alone is not evidence of video readiness.
+- `audio-lifecycle-ready` advertises support for audio-only lifecycle reporting.
+  `first-audio-packet` is emitted once, after the first non-configuration audio
+  packet is accepted by the active sinks. This also covers record-only sessions
+  with host playback disabled. The desktop requires both events before declaring
+  an audio-only session active; process startup alone is not audio readiness.
 - Recording status comes from the recorder callback after trailer/output close;
   process completion is still required before a new session can begin.
 - Stderr remains ordinary diagnostic output. The desktop accepts only exact

@@ -19,6 +19,7 @@
 static const char *session_token;
 static SDL_TimerID input_timer;
 static bool frame_reported;
+static bool audio_packet_reported;
 static bool camera_controls_reported;
 static bool android_controls_reported;
 static bool app_controls_reported;
@@ -199,6 +200,7 @@ sc_desktop_bridge_start(void) {
     }
     session_token = token;
     frame_reported = false;
+    audio_packet_reported = false;
     camera_controls_reported = false;
     android_controls_reported = false;
     app_controls_reported = false;
@@ -210,6 +212,9 @@ sc_desktop_bridge_start(void) {
     app_payload_received = 0;
     input_timer = SDL_AddTimer(50, read_commands, NULL);
     sc_desktop_bridge_report(input_timer ? "bridge-ready" : "bridge-error");
+    if (input_timer) {
+        sc_desktop_bridge_report("audio-lifecycle-ready");
+    }
 }
 
 void
@@ -286,6 +291,14 @@ sc_desktop_bridge_first_frame(void) {
         frame_reported = true;
         sc_desktop_bridge_report("first-frame");
         sc_desktop_bridge_report("window-controls-ready");
+    }
+}
+
+void
+sc_desktop_bridge_first_audio_packet(void) {
+    if (!audio_packet_reported) {
+        audio_packet_reported = true;
+        sc_desktop_bridge_report("first-audio-packet");
     }
 }
 

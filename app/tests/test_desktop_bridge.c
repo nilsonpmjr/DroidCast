@@ -33,6 +33,8 @@ int main(void) {
     sc_desktop_bridge_start();
     sc_desktop_bridge_first_frame();
     sc_desktop_bridge_first_frame();
+    sc_desktop_bridge_first_audio_packet();
+    sc_desktop_bridge_first_audio_packet();
     assert(SDL_WaitEventTimeout(&event, 1000));
     assert(event.type == SDL_EVENT_QUIT);
     sc_desktop_bridge_stop();

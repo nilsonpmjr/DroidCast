@@ -388,3 +388,27 @@ device compatibility testing remain open.
 - Deliberately deferred Audio-only mode: the current lifecycle is first-video-frame
   backed. It needs a native first-audio-frame event before the desktop can represent
   connection, streaming and failure states truthfully.
+
+## Part 20: first-packet-backed audio-only sessions
+
+- Added a typed Audio-only switch that emits `--no-video --no-control`, preserves the
+  chosen audio policy and rejects sessions with neither host playback nor recording.
+  Video, camera and input options are excluded rather than forwarded as contradictory
+  arguments.
+- Extended the native demuxer and opt-in desktop bridge with a one-shot
+  `first-audio-packet` event after a non-configuration packet is accepted by its
+  sinks. This path works with playback, recording, or recording without playback.
+- Added an explicit `audio-lifecycle-ready` capability. The desktop waits for that
+  capability and the first packet before showing Listening or Recording audio; an
+  older/non-fork engine fails with reinstall guidance instead of inventing success.
+- Made the active workspace contextual: it replaces mirror controls with audio status
+  and hides screenshots, Android/window/FPS actions, app launch, installation and
+  shortcut help. Stop and recording finalization continue through the existing clean
+  quit protocol.
+- Pinned mode, playback and capture guards to the running session so editing next-run
+  preferences cannot mutate current behavior. Audio-only cannot inherit stale camera,
+  virtual-display or control state.
+- Added argument, validation, capability, record-only, old-engine, preference-snapshot,
+  UI context and 920×680 layout coverage. MKV/MP4 remain the explicit recording
+  choices; audio-specific formats and physical-device/audio-output proof stay in the
+  gap register.

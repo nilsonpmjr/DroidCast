@@ -254,6 +254,77 @@ private slots:
     QCOMPARE(restored.options.value("audio-encoder").toString(),
              QString("c2.android.aac.encoder"));
   }
+  void audioOnlyArgumentsLifecycleAndOldEngineFailure() {
+    Preferences prefs = bundledPreferences();
+    prefs.options["audio-only"] = true;
+    prefs.options["audio-codec"] = "aac";
+    prefs.options["audio-source"] = "mic";
+    auto args = mirrorArguments("PHONE123", prefs);
+    QVERIFY(args.contains("--no-video"));
+    QVERIFY(args.contains("--no-control"));
+    QVERIFY(args.contains("--audio-codec=aac"));
+    QVERIFY(args.contains("--audio-source=mic"));
+    QVERIFY(!args.join(' ').contains("--video-codec="));
+    QVERIFY(!args.join(' ').contains("--video-bit-rate="));
+    QVERIFY(!args.join(' ').contains("--max-fps="));
+    QVERIFY(!args.join(' ').contains("--keyboard="));
+    QVERIFY(sessionIssue(prefs).message.isEmpty());
+
+    bool videoSourceAvailable = true, recordFormatAvailable = false;
+    for (const auto &option : sessionOptions()) {
+      if (option.key == "video-source")
+        videoSourceAvailable = sessionOptionAvailable(option, prefs);
+      if (option.key == "record-format")
+        recordFormatAvailable = sessionOptionAvailable(option, prefs);
+    }
+    QVERIFY(!videoSourceAvailable);
+    QVERIFY(recordFormatAvailable);
+    prefs.options["no-audio-playback"] = true;
+    QCOMPARE(sessionIssue(prefs).key, QString("no-audio-playback"));
+    QVERIFY(sessionIssue(prefs, true).message.isEmpty());
+    prefs.options["no-audio-playback"] = false;
+    prefs.audio = false;
+    QCOMPARE(sessionIssue(prefs).key, QString("audio-only"));
+
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.options["audio-only"] = true;
+    engine.devices = {{"PHONE123", "device", "Pixel", "USB"}};
+    QSignalSpy logs(&engine, &Engine::log);
+    QSignalSpy messages(&engine, &Engine::message);
+    QVERIFY(engine.start("PHONE123"));
+    QVERIFY(engine.audioOnlySession());
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Starting);
+    QTRY_COMPARE_WITH_TIMEOUT(engine.sessionState(),
+                              Engine::SessionState::Streaming, 3000);
+    QCOMPARE(engine.sessionStateText(), QString("Listening"));
+    QVERIFY(!engine.captureAllowed("PHONE123"));
+    QVERIFY(!engine.controlAllowed());
+    bool loggedAudioOnly = false;
+    for (const auto &entry : logs)
+      loggedAudioOnly |= entry.first().toString().contains("--no-video");
+    QVERIFY(loggedAudioOnly);
+    engine.preferences.options["audio-only"] = false;
+    QVERIFY(engine.audioOnlySession());
+    engine.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
+
+    engine.preferences.options["audio-only"] = true;
+    engine.preferences.options["no-audio-playback"] = true;
+    QVERIFY(engine.start("PHONE123", storage.filePath("audio-only.mkv")));
+    QTRY_COMPARE_WITH_TIMEOUT(engine.sessionState(),
+                              Engine::SessionState::Streaming, 3000);
+    QCOMPARE(engine.sessionStateText(), QString("Recording audio"));
+    engine.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
+
+    engine.preferences.options["no-audio-playback"] = false;
+    qputenv("HUB_TEST_MODE", "old-audio-lifecycle");
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 5000);
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Failed);
+    QVERIFY(messages.last().first().toString().contains("unavailable"));
+  }
   void cameraSessionGuardsStayPinnedToTheSession() {
     Engine engine;
     engine.preferences = bundledPreferences();
@@ -1629,6 +1700,56 @@ private slots:
         window.findChild<QStackedWidget *>()->currentWidget());
     QVERIFY(scroll);
     QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    bundledPreferences().save(settings);
+  }
+  void audioOnlyWorkspaceIsContextualAndFitsMinimumSize() {
+    QSettings settings;
+    auto prefs = bundledPreferences();
+    prefs.options["audio-only"] = true;
+    prefs.save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    auto *start = window.findChild<QPushButton *>("startMirror");
+    auto *record = window.findChild<QPushButton *>("recordMirror");
+    auto *videoSettings = window.findChild<QWidget *>("baseVideoSettings");
+    QVERIFY(start && record && videoSettings);
+    QCOMPARE(start->text(), QString("Start audio"));
+    QCOMPARE(record->text(), QString("Listen && record"));
+    QVERIFY(!videoSettings->isEnabled());
+
+    window.showPage(1);
+    auto *audioPanel = window.findChild<QWidget *>("audioOnlySessionPanel");
+    auto *audioFeedback =
+        window.findChild<QLabel *>("audioOnlySessionFeedback");
+    auto *displayTools = window.findChild<QWidget *>("displaySessionTools");
+    auto *screenshot = window.findChild<QPushButton *>("takeScreenshot");
+    auto *launchCard = window.findChild<QWidget *>("sessionAppLaunchCard");
+    auto *installCard = window.findChild<QWidget *>("sessionInstallCard");
+    auto *shortcuts = window.findChild<QWidget *>("mirrorShortcutsCard");
+    QVERIFY(audioPanel && audioFeedback && displayTools && screenshot &&
+            launchCard && installCard && shortcuts);
+    QVERIFY(audioPanel->isHidden());
+
+    QTRY_VERIFY(start->isEnabled());
+    start->click();
+    QTRY_VERIFY(!audioPanel->isHidden());
+    QTRY_COMPARE(audioFeedback->text(), QString("Listening"));
+    QVERIFY(displayTools->isHidden());
+    QVERIFY(screenshot->isHidden());
+    QVERIFY(launchCard->isHidden());
+    QVERIFY(installCard->isHidden());
+    QVERIFY(shortcuts->isHidden());
+    QVERIFY(window.findChild<QLabel *>("sessionDetail")
+                ->text()
+                .contains("does not open a mirror window"));
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    window.findChild<QPushButton *>("stopMirror")->click();
+    QTRY_VERIFY(
+        !window.findChild<QWidget *>("audioOnlySessionPanel")->isVisible());
     bundledPreferences().save(settings);
   }
   void phoneControlsTargetDeviceAndRespectReadOnly() {

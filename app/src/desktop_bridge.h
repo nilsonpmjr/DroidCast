@@ -8,6 +8,7 @@ void sc_desktop_bridge_start(void);
 void sc_desktop_bridge_stop(void);
 void sc_desktop_bridge_report(const char *event);
 void sc_desktop_bridge_first_frame(void);
+void sc_desktop_bridge_first_audio_packet(void);
 void sc_desktop_bridge_android_controls_ready(void);
 void sc_desktop_bridge_app_controls_ready(void);
 void sc_desktop_bridge_camera_controls_ready(void);

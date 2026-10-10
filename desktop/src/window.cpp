@@ -344,7 +344,8 @@ QWidget *Window::sessionPage() {
   preview->addStretch();
   preview->addWidget(new ConnectionArt);
   sessionDetail = label(
-      "No mirror running\n\nChoose a connected device and start mirroring.");
+      "No session running\n\nChoose a connected device and start a session.");
+  sessionDetail->setObjectName("sessionDetail");
   sessionDetail->setAlignment(Qt::AlignCenter);
   preview->addWidget(sessionDetail);
   auto *choose = button("Choose a device", "phone");
@@ -506,8 +507,33 @@ QWidget *Window::sessionPage() {
     if (!engine.cameraSession())
       cameraFeedback->setText("Start a camera session to use these controls.");
   });
-  preview->addWidget(label("Mirror window", "section"));
-  preview->addWidget(
+
+  auto *audioOnlyPanel = new QWidget;
+  audioOnlyPanel->setObjectName("audioOnlySessionPanel");
+  auto *audioOnlyLayout = new QVBoxLayout(audioOnlyPanel);
+  audioOnlyLayout->setContentsMargins(0, 8, 0, 8);
+  audioOnlyLayout->setSpacing(10);
+  audioOnlyLayout->addWidget(label("Audio-only session", "section"));
+  audioOnlyLayout->addWidget(label(
+      "No mirror window or Android controls are opened. DroidCast marks the "
+      "session active only after audio arrives from the phone.",
+      "muted"));
+  auto *audioOnlyFeedback = label("Waiting to start audio.", "badge");
+  audioOnlyFeedback->setObjectName("audioOnlySessionFeedback");
+  audioOnlyFeedback->setAccessibleName("Audio-only session status");
+  audioOnlyLayout->addWidget(audioOnlyFeedback);
+  audioOnlyPanel->hide();
+  preview->addWidget(audioOnlyPanel);
+
+  auto *displayToolsPanel = new QWidget;
+  displayToolsPanel->setObjectName("displaySessionTools");
+  displayToolsPanel->setSizePolicy(QSizePolicy::Ignored,
+                                   QSizePolicy::Preferred);
+  auto *displayTools = new QVBoxLayout(displayToolsPanel);
+  displayTools->setContentsMargins(0, 0, 0, 0);
+  displayTools->setSpacing(10);
+  displayTools->addWidget(label("Mirror window", "section"));
+  displayTools->addWidget(
       label("Window presentation controls. In resizable virtual-display mode, "
             "resizing also changes Android's display. Pausing the image does "
             "not pause audio or recording.",
@@ -538,17 +564,17 @@ QWidget *Window::sessionPage() {
     connect(control, &QPushButton::clicked, this,
             [this, action = entry.second] { engine.windowAction(action); });
   }
-  preview->addLayout(windowControls);
+  displayTools->addLayout(windowControls);
   auto *windowFeedback =
       label("Start mirroring to use window controls.", "muted");
   windowFeedback->setObjectName("windowControlFeedback");
-  preview->addWidget(windowFeedback);
+  displayTools->addWidget(windowFeedback);
   connect(&engine, &Engine::windowControlMessage, windowFeedback,
           &QLabel::setText);
   connect(&engine, &Engine::windowControlsChanged, this,
           &Window::updateActions);
-  preview->addWidget(label("Rendered FPS", "section"));
-  preview->addWidget(
+  displayTools->addWidget(label("Rendered FPS", "section"));
+  displayTools->addWidget(
       label("Measure frames rendered by the mirror. This is not the configured "
             "capture limit, display refresh rate or input latency.",
             "muted"));
@@ -565,11 +591,11 @@ QWidget *Window::sessionPage() {
     connect(control, &QPushButton::clicked, this,
             [this, action = entry.second] { engine.fpsAction(action); });
   }
-  preview->addLayout(fpsControls);
+  displayTools->addLayout(fpsControls);
   auto *fpsFeedback =
       label("Start mirroring to measure rendered FPS.", "muted");
   fpsFeedback->setObjectName("fpsControlFeedback");
-  preview->addWidget(fpsFeedback);
+  displayTools->addWidget(fpsFeedback);
   connect(&engine, &Engine::fpsControlMessage, fpsFeedback, &QLabel::setText);
   connect(&engine, &Engine::fpsControlsChanged, this, &Window::updateActions);
   connect(&engine, &Engine::sessionChanged, this,
@@ -579,6 +605,8 @@ QWidget *Window::sessionPage() {
               fpsFeedback->setText("Start mirroring to measure rendered FPS.");
             }
           });
+  displayTools->addStretch();
+  preview->addWidget(displayToolsPanel);
   preview->addStretch();
   columns->addWidget(previewCard, 3);
   auto *controls = new QVBoxLayout;
@@ -588,7 +616,7 @@ QWidget *Window::sessionPage() {
   sessionTime = label("00:00", "title");
   sessionTime->setAccessibleName("Elapsed process time");
   session->addWidget(sessionTime);
-  screenshotButton = button("Take screenshot", "capture");
+  screenshotButton = button("Take screenshot", "capture", "takeScreenshot");
   session->addWidget(screenshotButton);
   connect(screenshotButton, &QPushButton::clicked, this,
           &Window::captureScreen);
@@ -599,6 +627,7 @@ QWidget *Window::sessionPage() {
   controls->addWidget(sessionCard);
   QVBoxLayout *launchApp;
   auto *launchAppCard = card(launchApp);
+  launchAppCard->setObjectName("sessionAppLaunchCard");
   launchApp->addWidget(label("Launch application", "section"));
   launchApp->addWidget(label(
       "Choose an app inspected for this phone. DroidCast asks Android to "
@@ -644,6 +673,7 @@ QWidget *Window::sessionPage() {
   controls->addWidget(launchAppCard);
   QVBoxLayout *install;
   auto *installCard = card(install);
+  installCard->setObjectName("sessionInstallCard");
   install->addWidget(label("Install application", "section"));
   install->addWidget(label("Choose an APK to install on the selected phone. "
                            "Your phone may ask you to allow installation.",
@@ -712,6 +742,7 @@ QWidget *Window::sessionPage() {
   controls->addWidget(filePushCard);
   QVBoxLayout *keys;
   auto *keysCard = card(keys);
+  keysCard->setObjectName("mirrorShortcutsCard");
   keys->addWidget(label("Mirror shortcuts", "section"));
   keys->addWidget(
       label("Alt + F       Fullscreen\nAlt + H       Android Home\nAlt + B     "
@@ -721,9 +752,12 @@ QWidget *Window::sessionPage() {
   controls->addStretch();
   columns->addLayout(controls, 2);
   layout->addLayout(columns, 1);
-  layout->addWidget(label("The live display opens in its own DroidCast window. "
-                          "Close that window to finish recordings cleanly.",
-                          "muted"));
+  auto *displayHint = label(
+      "The live display opens in its own DroidCast window. Close that window "
+      "to finish recordings cleanly.",
+      "muted");
+  displayHint->setObjectName("sessionDisplayHint");
+  layout->addWidget(displayHint);
   return widget;
 }
 QWidget *Window::wirelessPage() {
@@ -935,6 +969,7 @@ QWidget *Window::settingsPage() {
           [this] { showPage(2); });
   connect(inputRoute, &QPushButton::clicked, this, [this] { showPage(4); });
   auto *video = new QGroupBox("Display && video quality");
+  video->setObjectName("baseVideoSettings");
   auto *form = new QFormLayout(video);
   form->setSpacing(14);
   form->setFieldGrowthPolicy(QFormLayout::FieldsStayAtSizeHint);
@@ -1653,6 +1688,8 @@ void Window::updateAppSelector() {
 }
 void Window::savePreferences() {
   engine.preferences.save(settings);
+  const bool audioOnly =
+      engine.preferences.options.value("audio-only", false).toBool();
   for (const auto &option : sessionOptions())
     if (auto *control = findChild<QWidget *>("option-" + option.key)) {
       const bool available = sessionOptionAvailable(option, engine.preferences);
@@ -1680,6 +1717,10 @@ void Window::savePreferences() {
                          : "Maximum captured video dimension; zero keeps the "
                            "original resolution.");
   }
+  if (auto *video = findChild<QWidget *>("baseVideoSettings"))
+    video->setEnabled(!audioOnly);
+  startButton->setText(audioOnly ? "Start audio" : "Start mirroring");
+  recordButton->setText(audioOnly ? "Listen && record" : "Mirror && record");
   for (auto *check : findChildren<QCheckBox *>()) {
     const auto key = check->property("preference").toString();
     if (key.isEmpty())
@@ -1765,6 +1806,7 @@ QString Window::selectedSerial() const {
 }
 void Window::updateActions() {
   const bool running = engine.running();
+  const bool audioOnly = engine.audioOnlySession();
   const auto capabilityTarget =
       running ? engine.activeSerial : selectedSerial();
   if (!cameraCapabilitySerial.isEmpty() &&
@@ -1850,7 +1892,23 @@ void Window::updateActions() {
   if (auto *cameraPanel = findChild<QWidget *>("cameraControlsPanel"))
     cameraPanel->setVisible(engine.cameraSession());
   if (auto *androidPanel = findChild<QWidget *>("androidControlsPanel"))
-    androidPanel->setVisible(running && !engine.cameraSession());
+    androidPanel->setVisible(running && !engine.cameraSession() && !audioOnly);
+  if (auto *audioPanel = findChild<QWidget *>("audioOnlySessionPanel"))
+    audioPanel->setVisible(audioOnly);
+  if (auto *displayTools = findChild<QWidget *>("displaySessionTools"))
+    displayTools->setVisible(!audioOnly);
+  if (auto *feedback = findChild<QLabel *>("audioOnlySessionFeedback")) {
+    feedback->setText(
+        !audioOnly ? "Waiting to start audio."
+        : engine.sessionState() == Engine::SessionState::Starting
+            ? "Connecting · waiting for audio"
+            : engine.sessionStateText());
+  }
+  for (const auto *name : {"sessionAppLaunchCard", "sessionInstallCard",
+                           "mirrorShortcutsCard", "sessionDisplayHint"})
+    if (auto *widget = findChild<QWidget *>(name))
+      widget->setVisible(!audioOnly);
+  screenshotButton->setVisible(!audioOnly);
   if (state == "unauthorized")
     deviceHelp->setText("Unlock your phone and accept the USB debugging "
                         "prompt. Devices refresh automatically.");
@@ -1862,7 +1920,11 @@ void Window::updateActions() {
                         "Android USB permissions / udev rules.");
   else if (ready)
     deviceHelp->setText("Selected: " + selectedSerial() +
-                        ". Choose Start mirroring when you are ready.");
+                        (engine.preferences.options
+                                 .value("audio-only", false)
+                                 .toBool()
+                             ? ". Choose Start audio when you are ready."
+                             : ". Choose Start mirroring when you are ready."));
   else if (item)
     deviceHelp->setText("Boot this device into Android to mirror it.");
   else
@@ -1872,29 +1934,42 @@ void Window::updateActions() {
   sessionStatus->setText(engine.sessionStateText() +
                          (running ? ": " + engine.activeSerial : QString{}));
   headerStatus->setText(engine.sessionStateText());
-  sessionDetail->setText(
-      running
-          ? engine.sessionStateText() + " · " + engine.activeSerial +
-                "\n\nYour live display opens in a separate DroidCast window. " +
-                (engine.cameraSession()
-                     ? "Camera capture: Android display commands and toolbar "
-                       "screenshots are unavailable; use session recording "
-                       "for the camera stream. Mirror-window controls remain "
-                       "available."
-                 : engine.usesAlternateDisplay()
-                     ? "Secondary/virtual display: use input inside the "
-                       "mirror. Phone-toolbar commands and screenshots are "
-                       "unavailable for this display; recording remains "
-                       "available. A virtual display without a launcher may "
-                       "need a Start Android package setting to show content."
-                     : "Use the controls here for screenshots and "
-                       "applications.") +
-                (engine.activeRecording.isEmpty()
-                     ? QString{}
-                     : "\n\nRecording to " +
-                           QFileInfo(engine.activeRecording).fileName())
-          : "No mirror running\n\nChoose a connected device and start "
-            "mirroring.");
+  QString detail;
+  if (!running) {
+    detail = "No session running\n\nChoose a connected device and start a "
+             "session.";
+  } else {
+    detail = engine.sessionStateText() + " · " + engine.activeSerial;
+    if (audioOnly) {
+      detail += "\n\nAudio-only mode does not open a mirror window or "
+                "Android control channel. ";
+      detail +=
+          engine.activeRecording.isEmpty()
+              ? "Sound plays on this computer after the first audio "
+                "packet arrives."
+              : "Recording to " + QFileInfo(engine.activeRecording).fileName();
+    } else {
+      detail += "\n\nYour live display opens in a separate DroidCast "
+                "window. ";
+      if (engine.cameraSession())
+        detail += "Camera capture: Android display commands and toolbar "
+                  "screenshots are unavailable; use session recording for "
+                  "the camera stream. Mirror-window controls remain "
+                  "available.";
+      else if (engine.usesAlternateDisplay())
+        detail += "Secondary/virtual display: use input inside the mirror. "
+                  "Phone-toolbar commands and screenshots are unavailable "
+                  "for this display; recording remains available. A virtual "
+                  "display without a launcher may need a Start Android "
+                  "package setting to show content.";
+      else
+        detail += "Use the controls here for screenshots and applications.";
+      if (!engine.activeRecording.isEmpty())
+        detail +=
+            "\n\nRecording to " + QFileInfo(engine.activeRecording).fileName();
+    }
+  }
+  sessionDetail->setText(detail);
 }
 bool Window::ensureCaptureDirectory() {
   if (QDir().mkpath(engine.preferences.mediaDirectory))
@@ -1979,7 +2054,7 @@ void Window::updateCaptures() {
   if (files.isEmpty()) {
     auto *empty = new QListWidgetItem(
         "No captures yet\n\nTake a screenshot from a connected device, or "
-        "choose Mirror & record to save your next session.",
+        "record your next session.",
         captureList);
     empty->setFlags(Qt::NoItemFlags);
   }
@@ -1988,8 +2063,8 @@ void Window::closeEvent(QCloseEvent *event) {
   if (engine.running()) {
     if (!closing && QMessageBox::question(
                         this, "End the active session?",
-                        "Closing DroidCast Desktop stops its mirror. Close the "
-                        "mirror window first to finish a recording cleanly.",
+                        "Closing DroidCast Desktop ends the active session and "
+                        "asks the engine to finalize any recording. Continue?",
                         QMessageBox::Yes | QMessageBox::No,
                         QMessageBox::No) != QMessageBox::Yes) {
       event->ignore();

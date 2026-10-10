@@ -240,6 +240,13 @@ const QList<SessionOption> &sessionOptions() {
        "Requires a compatible encoder on the phone.",
        "opus",
        {"opus", "aac", "flac", "raw"}},
+      {"audio-only",
+       "Audio",
+       "Audio-only session",
+       "Listen or record without opening a mirror window. Video and Android "
+       "control are disabled for this session.",
+       false,
+       {}},
       {"audio-source",
        "Audio",
        "Audio source",
@@ -353,10 +360,17 @@ const QList<SessionOption> &sessionOptions() {
 
 bool sessionOptionAvailable(const SessionOption &option, const Preferences &p) {
   const bool readOnly = p.options.value("no-control", false).toBool();
+  const bool audioOnly = p.options.value("audio-only", false).toBool();
   const bool camera =
       p.options.value("video-source", "display").toString() == "camera";
   const bool virtualDisplay =
       !camera && p.options.value("virtual-display", false).toBool();
+  if (option.key == "audio-only")
+    return p.audio;
+  if (audioOnly && option.category != "Audio" && option.category != "Recording")
+    return false;
+  if (audioOnly && option.key == "record-orientation")
+    return false;
   if (option.key == "video-source")
     return true;
   if (option.category == "Camera") {
@@ -519,6 +533,13 @@ PreferenceIssue sessionIssue(const Preferences &p, bool recording) {
   }
   const bool camera =
       p.options.value("video-source", "display").toString() == "camera";
+  const bool audioOnly = p.options.value("audio-only", false).toBool();
+  if (audioOnly && !p.audio)
+    return {"audio-only", "Audio-only sessions require audio forwarding."};
+  if (audioOnly && p.options.value("no-audio-playback", false).toBool() &&
+      !recording)
+    return {"no-audio-playback",
+            "Audio-only needs computer playback or a recording destination."};
   const bool virtualDisplay =
       !camera && p.options.value("virtual-display", false).toBool();
   if (camera && p.options.value("camera-high-speed", false).toBool() &&
@@ -800,6 +821,7 @@ QList<AppCapability> parseAppCapabilities(const QString &output) {
 
 QStringList mirrorArguments(const QString &serial, const Preferences &p,
                             const QString &recording) {
+  const bool audioOnly = p.options.value("audio-only", false).toBool();
   const bool camera =
       p.options.value("video-source", "display").toString() == "camera";
   const auto cameraSize = p.options.value("camera-size").toString().trimmed();
@@ -807,14 +829,17 @@ QStringList mirrorArguments(const QString &serial, const Preferences &p,
       camera && cameraSize.isEmpty() == false &&
       textOptionError("camera-size", cameraSize).isEmpty();
   QStringList args{"--serial=" + serial,
-                   "--max-fps=" + QString::number(p.fps),
-                   "--video-bit-rate=" + QString::number(p.bitrate) + "M",
-                   "--keyboard=" + p.keyboard,
-                   "--mouse=" + p.mouse,
-                   "--video-codec=" + p.codec,
                    "--window-title=DroidCast Desktop | " + serial};
-  if (p.size > 0 && !exactCameraSize)
-    args << "--max-size=" + QString::number(p.size);
+  if (audioOnly)
+    args << "--no-video" << "--no-control";
+  else {
+    args << "--max-fps=" + QString::number(p.fps)
+         << "--video-bit-rate=" + QString::number(p.bitrate) + "M"
+         << "--keyboard=" + p.keyboard << "--mouse=" + p.mouse
+         << "--video-codec=" + p.codec;
+    if (p.size > 0 && !exactCameraSize)
+      args << "--max-size=" + QString::number(p.size);
+  }
   if (!p.audio)
     args << "--no-audio";
   if (p.awake)
@@ -825,7 +850,8 @@ QStringList mirrorArguments(const QString &serial, const Preferences &p,
     args << "--always-on-top";
   if (!recording.isEmpty())
     args << "--record=" + recording;
-  const bool readOnly = p.options.value("no-control", false).toBool();
+  const bool readOnly =
+      audioOnly || p.options.value("no-control", false).toBool();
   if (readOnly) {
     args.removeAll("--stay-awake");
     args.removeAll("--turn-screen-off");
@@ -837,6 +863,8 @@ QStringList mirrorArguments(const QString &serial, const Preferences &p,
     if (!sessionOptionAvailable(option, p))
       continue;
     if (option.key == "virtual-display")
+      continue;
+    if (option.key == "audio-only")
       continue;
     if (option.key == "camera-facing" &&
         !p.options.value("camera-id").toString().trimmed().isEmpty())
@@ -1024,6 +1052,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
   scanTimeout.setSingleShot(true);
   wirelessTimeout.setSingleShot(true);
   stopTimeout.setSingleShot(true);
+  audioCapabilityTimeout.setSingleShot(true);
   connect(&scanTimeout, &QTimer::timeout, this, [this] {
     scanTimedOut = true;
     scan.kill();
@@ -1042,6 +1071,18 @@ Engine::Engine(QObject *parent) : QObject(parent) {
                    "be incomplete.");
       mirror.kill();
     }
+  });
+  connect(&audioCapabilityTimeout, &QTimer::timeout, this, [this] {
+    if (!running() || !activeAudioOnly || audioLifecycleReady)
+      return;
+    audioLifecycleFailure = true;
+    state = SessionState::Failed;
+    stopping = true;
+    emit message("The bundled engine does not support audio-only lifecycle "
+                 "reporting. Reinstall this DroidCast build.");
+    mirror.write("Q", 1);
+    stopTimeout.start(5000);
+    emit sessionChanged();
   });
   connect(&scan, &QProcess::stateChanged, this, [this] { emit scanChanged(); });
   connect(&scan, &QProcess::readyReadStandardOutput, this,
@@ -1077,15 +1118,22 @@ Engine::Engine(QObject *parent) : QObject(parent) {
     emit log(QString::fromUtf8(mirror.readAllStandardError()));
   });
   connect(&mirror, &QProcess::started, this, [this] {
-    if (!stopping)
-      emit message(
-          "Connecting to the phone. Waiting for the first video frame…");
+    if (!stopping) {
+      emit message(activeAudioOnly
+                       ? "Connecting to the phone. Waiting for the first "
+                         "audio packet…"
+                       : "Connecting to the phone. Waiting for the first "
+                         "video frame…");
+      if (activeAudioOnly)
+        audioCapabilityTimeout.start(2000);
+    }
     emit sessionChanged();
   });
   connect(&mirror, &QProcess::errorOccurred, this,
           [this](QProcess::ProcessError error) {
             if (error == QProcess::FailedToStart) {
               stopTimeout.stop();
+              audioCapabilityTimeout.stop();
               bridgeCommandTimeout.stop();
               state = SessionState::Failed;
               stopping = false;
@@ -1099,6 +1147,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
   connect(&mirror, &QProcess::finished, this,
           [this](int code, QProcess::ExitStatus status) {
             stopTimeout.stop();
+            audioCapabilityTimeout.stop();
             bridgeCommandTimeout.stop();
             pendingBridgeCommand = 0;
             readMirrorOutput();
@@ -1125,12 +1174,15 @@ Engine::Engine(QObject *parent) : QObject(parent) {
               emit message(
                   "Phone disconnected. Reconnect it and start a new session.");
             else if (state == SessionState::Failed)
-              emit message(
-                  "scrcpy exited with an error. Open Diagnostics for details.");
+              emit message(audioLifecycleFailure
+                               ? "Audio-only is unavailable in the bundled "
+                                 "engine. Reinstall DroidCast Desktop."
+                               : "scrcpy exited with an error. Open "
+                                 "Diagnostics for details.");
             else
               emit message(
                   recording ? "Recording finalized. Session ended."
-                            : "Session ended. You can start another mirror.");
+                            : "Session ended. You can start another session.");
             stopping = false;
             emit fpsControlsChanged();
             emit appLaunchControlsChanged();
@@ -1356,8 +1408,8 @@ bool Engine::start(const QString &serial, const QString &recording) {
   if (running())
     return false;
   if (inspecting()) {
-    emit message(
-        "Wait for device inspection to finish or cancel it before mirroring.");
+    emit message("Wait for device inspection to finish or cancel it before "
+                 "starting a session.");
     return false;
   }
   const auto issue = sessionIssue(preferences, !recording.isEmpty());
@@ -1370,7 +1422,7 @@ bool Engine::start(const QString &serial, const QString &recording) {
     if (device.serial == serial && device.ready())
       authorized = true;
   if (!authorized) {
-    emit message("Select an authorized device before starting a mirror.");
+    emit message("Select an authorized device before starting a session.");
     return false;
   }
   if (executablePath(preferences.scrcpy).isEmpty() ||
@@ -1391,16 +1443,21 @@ bool Engine::start(const QString &serial, const QString &recording) {
     env.insert("SCRCPY_SERVER_PATH", preferences.server);
   activeSerial = serial;
   activeRecording = recording;
-  activeReadOnly = preferences.options.value("no-control", false).toBool();
+  activeAudioOnly = preferences.options.value("audio-only", false).toBool();
+  activeAudioPlayback =
+      !preferences.options.value("no-audio-playback", false).toBool();
+  activeReadOnly = activeAudioOnly ||
+                   preferences.options.value("no-control", false).toBool();
   activeCamera =
+      !activeAudioOnly &&
       preferences.options.value("video-source", "display").toString() ==
-      "camera";
+          "camera";
   activeAlternateDisplay =
-      !activeCamera &&
+      !activeAudioOnly && !activeCamera &&
       (preferences.options.value("virtual-display", false).toBool() ||
        preferences.options.value("display-id", 0).toInt() != 0);
   activeFlexibleDisplay =
-      !activeCamera &&
+      !activeAudioOnly && !activeCamera &&
       preferences.options.value("virtual-display", false).toBool() &&
       preferences.options.value("flex-display", false).toBool() &&
       !activeReadOnly;
@@ -1419,28 +1476,39 @@ bool Engine::start(const QString &serial, const QString &recording) {
   fpsMeasurementActive = false;
   appCommandsReady = false;
   appCommandsHealthy = true;
+  audioLifecycleReady = false;
+  audioLifecycleFailure = false;
   pendingBridgeCommand = 0;
-  emit windowControlMessage(
-      "Window controls become available after the first video frame.");
+  emit windowControlMessage(activeAudioOnly
+                                ? "Audio-only sessions have no mirror window."
+                                : "Window controls become available after the "
+                                  "first video frame.");
   emit cameraControlMessage(
-      activeCamera ? "Camera controls become available after the "
-                     "first video frame."
-                   : "Start a camera session to use these controls.");
+      activeAudioOnly ? "Audio-only sessions have no camera controls."
+      : activeCamera  ? "Camera controls become available after the "
+                        "first video frame."
+                      : "Start a camera session to use these controls.");
   emit androidControlMessage(
-      activeCamera
+      activeAudioOnly ? "Audio-only sessions have no Android control channel."
+      : activeCamera
           ? "Android display actions are unavailable during camera capture."
       : activeReadOnly
           ? "Android device actions are disabled in read-only mode."
           : "Android device actions become available after the first frame.");
   emit clipboardControlMessage(
-      activeCamera ? "Clipboard actions are unavailable during camera capture."
+      activeAudioOnly ? "Audio-only sessions have no clipboard controls."
+      : activeCamera
+          ? "Clipboard actions are unavailable during camera capture."
       : activeReadOnly
           ? "Clipboard actions are disabled in read-only mode."
           : "Clipboard actions become available after the first frame.");
-  emit fpsControlMessage(
-      "Rendered FPS measurement becomes available after the first frame.");
+  emit fpsControlMessage(activeAudioOnly
+                             ? "Audio-only sessions do not render video frames."
+                             : "Rendered FPS measurement becomes available "
+                               "after the first frame.");
   emit appLaunchMessage(
-      activeCamera ? "App launch is unavailable during camera capture."
+      activeAudioOnly ? "App launch is unavailable in audio-only sessions."
+      : activeCamera  ? "App launch is unavailable during camera capture."
       : activeReadOnly
           ? "App launch is disabled in read-only mode."
           : "App launch becomes available after the first display frame.");
@@ -1461,6 +1529,7 @@ void Engine::stop() {
   if (!running() || stopping)
     return;
   stopping = true;
+  audioCapabilityTimeout.stop();
   bridgeCommandTimeout.stop();
   pendingBridgeCommand = 0;
   fpsMeasurementActive = false;
@@ -1482,7 +1551,9 @@ QString Engine::sessionStateText() const {
   case SessionState::Starting:
     return "Starting session";
   case SessionState::Streaming:
-    return "Streaming";
+    return activeAudioOnly
+               ? (activeAudioPlayback ? "Listening" : "Recording audio")
+               : "Streaming";
   case SessionState::Stopping:
     return "Finishing session";
   case SessionState::Ended:
@@ -1509,8 +1580,19 @@ void Engine::readMirrorOutput() {
     const auto event = line.mid(prefix.size());
     if (event == "bridge-ready")
       bridgeReady = true;
-    else if (event == "first-frame" && bridgeReady &&
-             state == SessionState::Starting) {
+    else if (event == "audio-lifecycle-ready" && bridgeReady) {
+      audioLifecycleReady = true;
+      audioCapabilityTimeout.stop();
+    } else if (event == "first-audio-packet" && bridgeReady &&
+               audioLifecycleReady && activeAudioOnly &&
+               state == SessionState::Starting) {
+      state = SessionState::Streaming;
+      emit message(activeAudioPlayback
+                       ? "Phone audio is playing on this computer."
+                       : "Phone audio is being recorded without local "
+                         "playback.");
+    } else if (event == "first-frame" && bridgeReady && !activeAudioOnly &&
+               state == SessionState::Starting) {
       state = SessionState::Streaming;
       emit message("Phone video is streaming in the mirror window.");
       emit windowControlMessage("Video is streaming. Window controls require "
@@ -2069,13 +2151,15 @@ bool Engine::canUseDevice(const QString &serial) {
 
 void Engine::capture(const QString &serial, const QString &path) {
   if (!captureAllowed(serial)) {
-    emit message(cameraSession()
-                     ? "Screenshots do not capture the active camera stream. "
-                       "Use session recording instead; the phone display was "
-                       "not captured."
-                     : "Screenshots of active secondary or virtual displays "
-                       "are not supported yet. Use session recording instead; "
-                       "the primary display was not captured.");
+    emit message(
+        audioOnlySession()
+            ? "Screenshots are unavailable during an audio-only session."
+        : cameraSession()
+            ? "Screenshots do not capture the active camera stream. Use "
+              "session recording instead; the phone display was not captured."
+            : "Screenshots of active secondary or virtual displays are not "
+              "supported yet. Use session recording instead; the primary "
+              "display was not captured.");
     return;
   }
   if (!canUseDevice(serial) || path.isEmpty())

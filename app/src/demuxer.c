@@ -297,6 +297,7 @@ run_demuxer(void *data) {
         goto finally_close_sinks;
     }
 
+    bool first_packet_reported = false;
     for (;;) {
         bool ok = sc_demuxer_recv_header(demuxer, header);
         if (!ok) {
@@ -328,7 +329,15 @@ run_demuxer(void *data) {
                 }
             }
 
+            bool media_packet = packet->pts != AV_NOPTS_VALUE;
             ok = sc_packet_source_sinks_push(&demuxer->packet_source, packet);
+            if (ok && media_packet && !first_packet_reported) {
+                first_packet_reported = true;
+                if (demuxer->cbs->on_first_packet) {
+                    demuxer->cbs->on_first_packet(demuxer,
+                                                  demuxer->cbs_userdata);
+                }
+            }
             av_packet_unref(packet);
             if (!ok) {
                 // The sink already logged its concrete error

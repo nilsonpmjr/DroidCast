@@ -227,6 +227,13 @@ sc_audio_demuxer_on_ended(struct sc_demuxer *demuxer,
 }
 
 static void
+sc_audio_demuxer_on_first_packet(struct sc_demuxer *demuxer, void *userdata) {
+    (void) demuxer;
+    (void) userdata;
+    sc_desktop_bridge_first_audio_packet();
+}
+
+static void
 sc_controller_on_ended(struct sc_controller *controller, bool error,
                        void *userdata) {
     // Note: this function may be called twice, once from the controller thread
@@ -544,6 +551,7 @@ scrcpy(struct scrcpy_options *options) {
     if (options->audio) {
         static const struct sc_demuxer_callbacks audio_demuxer_cbs = {
             .on_ended = sc_audio_demuxer_on_ended,
+            .on_first_packet = sc_audio_demuxer_on_first_packet,
         };
         sc_demuxer_init(&s->audio_demuxer, "audio", s->server.audio_socket,
                         &audio_demuxer_cbs, options);

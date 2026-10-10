@@ -101,8 +101,10 @@ public:
     return running() && activeAlternateDisplay;
   }
   bool cameraSession() const { return running() && activeCamera; }
+  bool audioOnlySession() const { return running() && activeAudioOnly; }
   bool captureAllowed(const QString &serial) const {
-    return (!usesAlternateDisplay() && !cameraSession()) ||
+    return (!usesAlternateDisplay() && !cameraSession() &&
+            !audioOnlySession()) ||
            serial != activeSerial;
   }
   enum class WindowAction {
@@ -192,19 +194,22 @@ private:
   QByteArray inspectionOutput;
   QString inspectionSerial;
   bool inspectionAborted = false;
-  QTimer scanTimeout, wirelessTimeout, stopTimeout, deviceTimeout;
+  QTimer scanTimeout, wirelessTimeout, stopTimeout, deviceTimeout,
+      audioCapabilityTimeout;
   QByteArray deviceOutput;
   QString capturePath;
   QString pushDestination;
   bool commandTask = false, filePushTask = false, activeReadOnly = false;
   bool activeAlternateDisplay = false, activeFlexibleDisplay = false,
-       activeCamera = false;
+       activeCamera = false, activeAudioOnly = false,
+       activeAudioPlayback = true;
   bool deviceTimedOut = false, deviceAborted = false;
   bool canUseDevice(const QString &serial);
   bool stopping = false, scanTimedOut = false, wirelessTimedOut = false;
   SessionState state = SessionState::Idle;
   bool forcedStop = false, bridgeReady = false, recordingFinalized = false,
-       recordingFailed = false;
+       recordingFailed = false, audioLifecycleReady = false,
+       audioLifecycleFailure = false;
   QByteArray sessionToken, mirrorOutput;
   QTimer bridgeCommandTimeout;
   bool windowCommandsReady = false, windowCommandsHealthy = true;

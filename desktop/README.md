@@ -61,7 +61,7 @@ Windows/macOS build paths have not yet been exercised.
 - **Connected devices:** illustrated first-connection guidance, automatic ADB
   discovery, device cards, authorization/USB-permission states, explicit device
   selection, quick session preferences, mirror and record actions.
-- **Active session:** first-frame-backed lifecycle state, elapsed process time,
+- **Active session:** media-backed lifecycle state, elapsed process time,
   selected phone, recording destination, screenshot capture, APK installation,
   Back/Home/Recents/Power/volume toolbar and graceful stop. The live video opens in
   a separate DroidCast mirror window; the workspace illustration is not a preview.
@@ -86,6 +86,10 @@ Windows/macOS build paths have not yet been exercised.
   to the active phone, works in read-only and camera sessions, supports cancellation
   and replaces an existing destination file with the same name. Routine status shows
   only the source filename and Android destination, never the local host path.
+  Audio-only sessions use a contextual listening/recording workspace, open no
+  mirror or Android control channel, and become active only after the fork
+  reports the first real audio packet. Window, FPS, screenshot and app-launch
+  tools are removed from that session context rather than left as dead controls.
   Camera sessions reveal contextual torch on/off and relative zoom controls.
   They use scrcpy's Android control channel, so they are unavailable in read-only
   mode and report requests rather than assuming the hardware accepted them.
@@ -113,6 +117,9 @@ Windows/macOS build paths have not yet been exercised.
   policy, host playback and both buffers. Codec and playback dependencies disable
   ignored controls without deleting their saved values. Disabling host playback
   keeps audio in a recording; without a recording, scrcpy has no audio consumer.
+  Audio-only mode enforces that boundary and uses `--no-video --no-control`.
+  Recording currently keeps the explicit MKV/MP4 container choices; dedicated
+  M4A/MKA/OPUS/AAC/FLAC/WAV choices remain a separate compatibility step.
   The **Virtual display** category adds Android 10+ display creation, resolution/
   density, flexible resizing, keyboard placement, system decorations and app
   handling on close. Inspecting the selected phone populates a searchable installed-
@@ -145,15 +152,18 @@ launch, but creating an explicitly selected virtual display still occurs.
 Close the mirror window or use Stop to request normal engine cleanup. The fork
 reports recorder finalization separately from process completion. An unresponsive
 process is killed after five seconds and the app warns that recordings may be
-incomplete. Streaming is reported only after the first video frame, not merely
-process startup. See [the private bridge documentation](BRIDGE.md).
+incomplete. Video streaming is reported only after the first frame. Audio-only
+listening or recording is reported only after bridge capability readiness and
+the first media packet, never merely from process startup. See
+[the private bridge documentation](BRIDGE.md).
 
 ## Verification and visual review
 
 Tests cover device parsing and states, argument boundaries, wireless validation,
 settings persistence, no automatic mirroring, process failures/timeouts, pairing,
 valid/invalid screenshot handling, APK results, synchronized preference switches,
-input-mode compatibility, recording validation, first-frame lifecycle, graceful
+input-mode compatibility, recording validation, video-frame and audio-packet
+lifecycle, graceful
 stop/finalization, disconnects, and absence of executable-path settings. Tests use a compiled helper and temporary
 runtime; no connected phone is required and no fake devices enter the product.
 

@@ -20,40 +20,40 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Area | Status | What works now | Gap to close |
 | --- | --- | --- | --- |
 | Bundled runtime | Partial | The forked client, ADB and matching server are launched without executable pickers. | Clean-machine packages, signing and Windows/macOS verification. |
-| Session lifecycle | Partial | First-frame state, graceful stop, recording finalization and disconnect/failure states. | Real unplug/reconnect and playable-recording tests on phones. |
+| Session lifecycle | Partial | First-video-frame or first-audio-packet state, graceful stop, recording finalization and disconnect/failure states. | Real unplug/reconnect and playable-recording tests on phones. |
 | Device workspace | Partial | USB discovery, wireless pair/connect, screenshots, APK install and selected-device targeting. | Complete pair-to-mirror guidance and broader recovery testing. |
 | Configuration routes | Partial | Searchable Video, Camera, Audio, Device, Window, Keyboard, Mouse, Gamepad, Recording and Virtual display categories. | Connection/Tunnels, Control, OTG, Video4Linux and complete Shortcuts routes. |
 | Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, inspected-app launch, one-file transfer, Android/window rotation, reset video, mirror-window actions, rendered-FPS measurement and contextual camera controls. | Decide whether multi-file drag/drop and transfer progress belong in release scope. |
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
-| Audio | Partial | Enablement, all capture sources, Android playback duplication, codec-matched inspected/manual encoder, bitrate, require-audio, host playback and buffers. | Audio-only lifecycle/recording workflow and physical-device proof. |
+| Audio | Partial | Enablement, all capture sources, Android playback duplication, codec-matched inspected/manual encoder, bitrate, require-audio, host playback/buffers and real first-packet-backed audio-only sessions. | Dedicated audio recording formats and physical-device proof. |
 | Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior and UHID gamepad. | Mouse bindings, shortcut modifier, AOA modes, gesture help and peripheral tests. |
 | Virtual display | Partial | Creation, size/DPI, flex, searchable inspected-app picker, manual package fallback, IME, decorations and close policy. | Android 10+ hardware journeys. |
 | Camera | Partial | Source, ID/facing, guided declared size/FPS/high-speed choices, manual fallback, startup torch/zoom and live torch/zoom. | Android-version/capability gates and real camera tests. |
-| Recording | Partial | MKV/MP4, rotation, time limit, unique paths and graceful finalization state. | Audio-only/no-playback workflows and playback verification of real files. |
+| Recording | Partial | MKV/MP4 video or audio-only sessions, no-playback recording, unique paths and graceful finalization state. | Audio-specific formats plus playback verification of real files. |
 | Embedded video | Open decision | The engine opens a separate native mirror window. | Decide release scope; prototype a real frame inside Qt before promising it. |
 | OTG | Open | Nothing end to end. | USB discovery without ADB, control-only session model, drivers and hardware tests. |
 | Remote tunnels | Open | Ordinary wireless ADB pairing/connection only. | Consistent remote socket/tunnel configuration across every ADB operation. |
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
 
-## Next implementation: first-class audio-only sessions
+## Next implementation: audio-specific recording formats
 
-Advanced audio policy and encoder guidance are complete in code. Audio-only must be a
-real lifecycle mode rather than a cosmetic shortcut for several raw flags.
+Audio-only is now a real lifecycle mode, but its recording picker deliberately remains
+on the existing MKV/MP4 path. The next bounded slice completes the file contract.
 
-1. Add a typed Audio-only session mode that emits `--no-video --no-control`, explains
-   the loss of the mirror window/input, and keeps host playback or recording explicit.
-2. Extend the native desktop bridge with a one-shot `first-audio-frame` event from the
-   decoded audio path. Do not mark a session streaming merely because the process or
-   bridge started; Android connection/audio failures must remain distinguishable.
-3. Make lifecycle copy and the Active session workspace contextual: listening versus
-   recording, no screenshot/window/FPS/app-launch actions, and clean stop/finalization.
-4. Support audio-only recording containers only after defining OPUS/AAC/FLAC/WAV
-   compatibility and file naming. Until then, keep the existing MKV/MP4 path explicit.
-5. Test first-frame success, required-audio failure, optional-audio-with-no-video
-   rejection, disconnect, recording finalization and old-engine capability behavior.
-6. Hardware-test Android 11 unlocked-start behavior, Android 12+ output/microphone,
-   Android 13 duplication, Bluetooth/routing changes and long recordings.
+1. Offer M4A, MKA, OPUS, AAC, FLAC and WAV only during audio-only recording; keep
+   video sessions on MKV/MP4.
+2. Derive codec compatibility from the fork contract: OPUS, AAC, FLAC and WAV require
+   their matching codecs; M4A accepts supported encoded audio but rejects raw; and
+   MKA/MKV follow the muxer's supported streams. Keep MKV as the flexible fallback.
+3. Generate the extension and `--record-format` from one typed selection so the
+   capture library and engine can never disagree about the file.
+4. Give audio recordings a distinct library icon/filter while keeping active-file
+   protection and graceful finalization unchanged.
+5. Test every compatible and rejected codec/container pair, migration from saved
+   MKV/MP4 preferences, unique names and the 920×680 layout contract.
+6. Hardware-play every resulting format after normal stop, unplug and no-host-playback
+   recording before marking recording complete.
 
 ## Release-proof still required for recent work
 
@@ -82,6 +82,10 @@ real lifecycle mode rather than a cosmetic shortcut for several raw flags.
   duplication, inspected/default encoder fallback, custom bitrates, required-audio
   failures and recording with computer playback disabled. Vendor audio policies and
   routes cannot be proven by the fake-process tests.
+- **Audio-only:** verify Android 11 unlocked-start behavior, Android 12+ playback and
+  microphone sources, Android 13 duplication, Bluetooth/routing changes, playback-
+  disabled recording, disconnect and long sessions. Automated tests prove packet-
+  backed state and mode boundaries, not audible output or a playable file.
 - **Cross-platform bridge:** exercise stdin commands and shutdown on Windows; validate
   the app bundle and pipe behavior on macOS.
 - **Host branding:** confirm Desktop/Laptop selection on Windows hardware and both

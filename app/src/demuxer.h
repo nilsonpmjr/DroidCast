@@ -30,6 +30,7 @@ enum sc_demuxer_status {
 struct sc_demuxer_callbacks {
     void (*on_ended)(struct sc_demuxer *demuxer, enum sc_demuxer_status,
                      void *userdata);
+    void (*on_first_packet)(struct sc_demuxer *demuxer, void *userdata);
 };
 
 // The name must be statically allocated (e.g. a string literal)
