@@ -9,6 +9,7 @@ class QPushButton;
 class QPlainTextEdit;
 class QCloseEvent;
 class QComboBox;
+class QLineEdit;
 class Window : public QMainWindow {
   Q_OBJECT
 public:
@@ -28,10 +29,13 @@ private:
   QStackedWidget *pages;
   QLabel *notice, *deviceHelp, *sessionStatus, *runtimeStatus, *deviceCount,
       *sessionDetail, *captureDirectory;
-  QLabel *headerStatus, *sessionTime, *appLaunchFeedback;
+  QLabel *headerStatus, *sessionTime, *appLaunchFeedback, *pushFileName,
+      *filePushFeedback;
   QWidget *welcome;
   QPushButton *startButton, *recordButton, *stopButton, *refreshButton,
       *screenshotButton, *apkButton, *sessionStop, *appLaunchButton;
+  QPushButton *choosePushFileButton, *pushFileButton, *cancelPushButton;
+  QLineEdit *pushDestination;
   QPlainTextEdit *logs;
   QComboBox *captureFilter,
       *sessionAppSelector = nullptr, *cameraIdSelector = nullptr,
@@ -39,7 +43,7 @@ private:
       *displaySelector = nullptr, *videoEncoderSelector = nullptr,
       *appSelector = nullptr;
   QString fingerprint, cameraCapabilitySerial, deviceCapabilitySerial,
-      appCapabilitySerial;
+      appCapabilitySerial, pendingPushPath;
   QList<CameraCapability> cameraCapabilities;
   QList<DisplayCapability> displayCapabilities;
   QList<VideoEncoderCapability> videoEncoderCapabilities;

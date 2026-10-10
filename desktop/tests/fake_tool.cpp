@@ -101,6 +101,14 @@ int main(int argc, char **argv) {
     out << (mode == "install-fail" ? "Failure [INSTALL_FAILED]" : "Success");
     return 0;
   }
+  if (args.contains("push")) {
+    if (mode == "push-hang")
+      return app.exec();
+    out << args.join('|') << '\n';
+    out << (mode == "push-fail" ? "adb: error: failed to copy"
+                                : "1 file pushed. 0 skipped.");
+    return 0;
+  }
   if (args.contains("devices")) {
     if (mode == "scan-fail")
       return 1;

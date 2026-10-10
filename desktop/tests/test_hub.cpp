@@ -1725,6 +1725,103 @@ private slots:
     QTRY_VERIFY(!engine.deviceBusy());
     QTRY_VERIFY(messages.last()[0].toString().contains("Installation failed"));
   }
+  void filePushValidatesTargetsReportsFailureAndCancels() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.devices = {{"PHONE123", "device", "Test phone", "USB"},
+                      {"OTHER", "device", "Other", "USB"}};
+    QFile source(storage.filePath("résumé notes.txt"));
+    QVERIFY(source.open(QIODevice::WriteOnly));
+    source.write("DroidCast transfer test");
+    source.close();
+    QSignalSpy feedback(&engine, &Engine::filePushMessage);
+    QSignalSpy logs(&engine, &Engine::log);
+
+    engine.pushFile("PHONE123", source.fileName(), "/sdcard/Meus Arquivos/");
+    QTRY_VERIFY(!engine.deviceBusy());
+    QTRY_VERIFY(feedback.last().first().toString().contains(
+        "/sdcard/Meus Arquivos/résumé notes.txt"));
+    QVERIFY(logs.last().first().toString().contains("|-s|PHONE123|push|"));
+    QVERIFY(logs.last().first().toString().contains("|/sdcard/Meus Arquivos/"));
+
+    for (const auto &destination :
+         {QString("relative/path"), QString("/"), QString("/sdcard/../data"),
+          QString("/sdcard/Down\nload")}) {
+      engine.pushFile("PHONE123", source.fileName(), destination);
+      QVERIFY(!engine.deviceBusy());
+      QVERIFY(feedback.last().first().toString().contains(
+          "absolute Android directory"));
+    }
+    engine.pushFile("PHONE123", storage.filePath("missing.txt"),
+                    "/sdcard/Download");
+    QVERIFY(feedback.last().first().toString().contains("regular file"));
+    engine.pushFile("PHONE123", storage.path(), "/sdcard/Download");
+    QVERIFY(feedback.last().first().toString().contains("regular file"));
+    engine.pushFile("MISSING", source.fileName(), "/sdcard/Download");
+    QVERIFY(feedback.last().first().toString().contains("authorized device"));
+
+    qputenv("HUB_TEST_MODE", "push-fail");
+    engine.pushFile("PHONE123", source.fileName(), "/sdcard/Download");
+    QTRY_VERIFY(!engine.deviceBusy());
+    QTRY_VERIFY(feedback.last().first().toString().contains("failed"));
+
+    qputenv("HUB_TEST_MODE", "push-hang");
+    engine.pushFile("PHONE123", source.fileName(), "/sdcard/Download");
+    QTRY_VERIFY(engine.filePushBusy());
+    engine.pushFile("PHONE123", source.fileName(), "/sdcard/Download");
+    QVERIFY(feedback.last().first().toString().contains("in progress"));
+    engine.cancelDeviceTask();
+    QTRY_VERIFY(!engine.deviceBusy());
+    QVERIFY(feedback.last().first().toString().contains("canceled"));
+
+    qunsetenv("HUB_TEST_MODE");
+    engine.preferences.options["no-control"] = true;
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    engine.pushFile("OTHER", source.fileName(), "/sdcard/Download");
+    QVERIFY(feedback.last().first().toString().contains("active session"));
+    engine.pushFile("PHONE123", source.fileName(), "/sdcard/Download");
+    QTRY_VERIFY(!engine.deviceBusy());
+    QTRY_VERIFY(feedback.last().first().toString().contains("File copied"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+
+    engine.preferences.options["no-control"] = false;
+    engine.preferences.options["video-source"] = "camera";
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE(engine.sessionState(), Engine::SessionState::Streaming);
+    QVERIFY(engine.cameraSession());
+    engine.pushFile("PHONE123", source.fileName(), "/sdcard/Download");
+    QTRY_VERIFY(!engine.deviceBusy());
+    QTRY_VERIFY(feedback.last().first().toString().contains("File copied"));
+    engine.stop();
+    QTRY_VERIFY(!engine.running());
+  }
+  void filePushWorkspaceIsAccessibleAndFitsMinimumSize() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    settings.remove("filePushDestination");
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(1);
+    auto *destination = window.findChild<QLineEdit *>("filePushDestination");
+    auto *choose = window.findChild<QPushButton *>("choosePushFile");
+    auto *send = window.findChild<QPushButton *>("pushFile");
+    auto *cancel = window.findChild<QPushButton *>("cancelPushFile");
+    auto *feedback = window.findChild<QLabel *>("filePushFeedback");
+    QVERIFY(destination && choose && send && cancel && feedback);
+    QCOMPARE(destination->text(), QString("/sdcard/Download/"));
+    QCOMPARE(destination->accessibleName(),
+             QString("Android destination directory"));
+    QTRY_VERIFY(choose->isEnabled());
+    QVERIFY(!send->isEnabled());
+    QVERIFY(!cancel->isEnabled());
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+  }
   void settingsHaveNoExecutablePickersAndTogglesStayInSync() {
     Window window;
     window.showPage(5);

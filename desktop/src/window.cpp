@@ -659,6 +659,57 @@ QWidget *Window::sessionPage() {
       engine.installApk(serial, path);
   });
   controls->addWidget(installCard);
+  QVBoxLayout *filePush;
+  auto *filePushCard = card(filePush);
+  filePush->addWidget(label("Send file", "section"));
+  filePush->addWidget(
+      label("Copy one file to Android. This transfer targets the active phone, "
+            "independently of the mirrored display and control mode. A file "
+            "with the same name at the destination is replaced.",
+            "muted"));
+  pushDestination = new QLineEdit(
+      settings.value("filePushDestination", "/sdcard/Download/").toString());
+  pushDestination->setObjectName("filePushDestination");
+  pushDestination->setAccessibleName("Android destination directory");
+  pushDestination->setPlaceholderText("/sdcard/Download/");
+  filePush->addWidget(pushDestination);
+  connect(pushDestination, &QLineEdit::editingFinished, this, [this] {
+    settings.setValue("filePushDestination", pushDestination->text());
+  });
+  connect(pushDestination, &QLineEdit::textChanged, this,
+          [this] { updateActions(); });
+  pushFileName = label("No host file selected.", "muted");
+  pushFileName->setObjectName("pushFileName");
+  filePush->addWidget(pushFileName);
+  choosePushFileButton = button("Choose file…", "folder", "choosePushFile");
+  pushFileButton = button("Send to phone", "phone", "pushFile");
+  cancelPushButton = button("Cancel transfer", {}, "cancelPushFile");
+  filePush->addWidget(choosePushFileButton);
+  filePush->addWidget(pushFileButton);
+  filePush->addWidget(cancelPushButton);
+  filePushFeedback =
+      label("Choose a file and confirm its destination.", "muted");
+  filePushFeedback->setObjectName("filePushFeedback");
+  filePush->addWidget(filePushFeedback);
+  connect(choosePushFileButton, &QPushButton::clicked, this, [this] {
+    const auto path =
+        QFileDialog::getOpenFileName(this, "Send file to Android");
+    if (!path.isEmpty()) {
+      pendingPushPath = path;
+      pushFileName->setText(QFileInfo(path).fileName());
+      updateActions();
+    }
+  });
+  connect(pushFileButton, &QPushButton::clicked, this, [this] {
+    const auto serial =
+        engine.running() ? engine.activeSerial : selectedSerial();
+    engine.pushFile(serial, pendingPushPath, pushDestination->text());
+  });
+  connect(cancelPushButton, &QPushButton::clicked, &engine,
+          &Engine::cancelDeviceTask);
+  connect(&engine, &Engine::filePushMessage, filePushFeedback,
+          &QLabel::setText);
+  controls->addWidget(filePushCard);
   QVBoxLayout *keys;
   auto *keysCard = card(keys);
   keys->addWidget(label("Mirror shortcuts", "section"));
@@ -1676,6 +1727,12 @@ void Window::updateActions() {
       deviceAvailable &&
       engine.captureAllowed(running ? engine.activeSerial : selectedSerial()));
   apkButton->setEnabled(deviceAvailable && engine.controlAllowed());
+  choosePushFileButton->setEnabled(deviceAvailable);
+  pushDestination->setEnabled(!engine.deviceBusy());
+  pushFileButton->setEnabled(deviceAvailable &&
+                             QFileInfo(pendingPushPath).isFile() &&
+                             !pushDestination->text().trimmed().isEmpty());
+  cancelPushButton->setEnabled(engine.filePushBusy());
   if (sessionAppSelector && appLaunchButton) {
     const bool targetApps = running &&
                             appCapabilitySerial == engine.activeSerial &&

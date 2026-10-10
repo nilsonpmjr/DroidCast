@@ -81,6 +81,11 @@ Windows/macOS build paths have not yet been exercised.
   list on the display being mirrored, including a virtual display. Exact packages
   travel through scrcpy's bounded native control message, not a shell command;
   acknowledgement means queued, not foreground activity confirmed.
+  A one-file transfer card copies a deliberately selected regular file through an
+  argument-vector ADB push to a validated absolute Android directory. It stays pinned
+  to the active phone, works in read-only and camera sessions, supports cancellation
+  and replaces an existing destination file with the same name. Routine status shows
+  only the source filename and Android destination, never the local host path.
   Camera sessions reveal contextual torch on/off and relative zoom controls.
   They use scrcpy's Android control channel, so they are unavailable in read-only
   mode and report requests rather than assuming the hardware accepted them.

@@ -348,3 +348,23 @@ device compatibility testing remain open.
   primary and virtual displays, unavailable/timeout/old-engine paths, mode gates,
   exact UI selection and layout. An AddressSanitizer pass also exposed and verified
   a Window/Engine teardown fix for final child-process signals.
+
+## Part 18: bounded one-file transfer
+
+- Added a deliberate file chooser and persisted Android destination to the active-
+  session workspace. Routine feedback exposes the source basename and Android target,
+  not the local host path, and the UI states that a same-name destination is replaced.
+- Transfers use `adb -s <serial> push` as a direct argument vector. The source must be
+  a readable regular file; the destination must be absolute, bounded and free of dot
+  components and control characters. No shell command is composed.
+- Pinned an in-session transfer to the active authorized serial while keeping it
+  independent of video display and Android control modes. Read-only and camera
+  sessions are supported; a later idle selection cannot retarget the operation.
+- Serialized transfer with screenshots, APK installation and phone actions through
+  the existing device-task process. Added a five-minute timeout, bounded output,
+  explicit cancellation and failure detection even when ADB exits with status zero.
+- Tests cover spaces and Unicode in both host and Android paths, missing/non-regular
+  sources, unauthorized and busy targets, hostile destinations, zero-exit failure,
+  cancellation, active-device pinning, read-only and camera sessions, accessibility
+  and the 920×680 layout. Physical phone and cross-platform transfer proof remains in
+  the gap register.

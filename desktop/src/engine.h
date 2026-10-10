@@ -81,8 +81,14 @@ public:
   bool deviceBusy() const {
     return deviceTask.state() != QProcess::NotRunning || inspecting();
   }
+  bool filePushBusy() const {
+    return filePushTask && deviceTask.state() != QProcess::NotRunning;
+  }
   void capture(const QString &serial, const QString &path);
   void installApk(const QString &serial, const QString &path);
+  void pushFile(const QString &serial, const QString &path,
+                const QString &destination);
+  void cancelDeviceTask();
   enum class PhoneAction { Back, Home, Recents, Power, VolumeUp, VolumeDown };
   void phoneAction(const QString &serial, PhoneAction action);
   bool controlAllowed() const;
@@ -169,6 +175,7 @@ signals:
   void fpsControlMessage(const QString &text);
   void appLaunchControlsChanged();
   void appLaunchMessage(const QString &text);
+  void filePushMessage(const QString &text);
   void captureSaved(const QString &path);
   void message(const QString &text);
   void log(const QString &text);
@@ -183,10 +190,11 @@ private:
   QTimer scanTimeout, wirelessTimeout, stopTimeout, deviceTimeout;
   QByteArray deviceOutput;
   QString capturePath;
-  bool commandTask = false, activeReadOnly = false;
+  QString pushDestination;
+  bool commandTask = false, filePushTask = false, activeReadOnly = false;
   bool activeAlternateDisplay = false, activeFlexibleDisplay = false,
        activeCamera = false;
-  bool deviceTimedOut = false;
+  bool deviceTimedOut = false, deviceAborted = false;
   bool canUseDevice(const QString &serial);
   bool stopping = false, scanTimedOut = false, wirelessTimedOut = false;
   SessionState state = SessionState::Idle;

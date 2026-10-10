@@ -1100,8 +1100,11 @@ Engine::Engine(QObject *parent) : QObject(parent) {
   connect(&deviceTimeout, &QTimer::timeout, this, [this] {
     deviceTimedOut = true;
     deviceTask.kill();
-    emit message(
-        "The device operation timed out. Reconnect your phone and try again.");
+    const auto text =
+        "The device operation timed out. Reconnect your phone and try again.";
+    if (filePushTask)
+      emit filePushMessage(text);
+    emit message(text);
   });
   connect(&deviceTask, &QProcess::stateChanged, this,
           [this] { emit deviceTaskChanged(); });
@@ -1110,60 +1113,97 @@ Engine::Engine(QObject *parent) : QObject(parent) {
     if (deviceOutput.size() > 32 * 1024 * 1024) {
       deviceTimedOut = true;
       deviceTask.kill();
-      emit message(
-          "The device returned too much data. The capture was not saved.");
+      const auto text = filePushTask
+                            ? "The transfer returned too much output and was "
+                              "stopped."
+                            : "The device returned too much data. The capture "
+                              "was not saved.";
+      if (filePushTask)
+        emit filePushMessage(text);
+      emit message(text);
     }
   });
   connect(&deviceTask, &QProcess::readyReadStandardError, this, [this] {
-    emit log(QString::fromUtf8(deviceTask.readAllStandardError()));
+    const auto error = deviceTask.readAllStandardError();
+    if (filePushTask)
+      deviceOutput += error;
+    emit log(QString::fromUtf8(error));
+    if (filePushTask && deviceOutput.size() > 32 * 1024 * 1024) {
+      deviceTimedOut = true;
+      deviceTask.kill();
+      const auto text =
+          "The transfer returned too much output and was stopped.";
+      emit filePushMessage(text);
+      emit message(text);
+    }
   });
   connect(
       &deviceTask, &QProcess::errorOccurred, this,
       [this](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart) {
           deviceTimeout.stop();
-          emit message(
-              "The bundled device service could not start. See Diagnostics.");
+          const auto text =
+              "The bundled device service could not start. See Diagnostics.";
+          if (filePushTask)
+            emit filePushMessage(text);
+          emit message(text);
         }
       });
-  connect(&deviceTask, &QProcess::finished, this,
-          [this](int code, QProcess::ExitStatus status) {
-            deviceTimeout.stop();
-            deviceOutput += deviceTask.readAllStandardOutput();
-            if (deviceTimedOut)
-              return;
-            if (code != 0 || status != QProcess::NormalExit) {
-              emit message(
-                  "Device operation failed. See Diagnostics for details.");
-              return;
-            }
-            if (commandTask) {
-              emit log(QString::fromUtf8(deviceOutput).trimmed());
-              emit message("Phone command completed.");
-            } else if (capturePath.isEmpty()) {
-              const auto result = QString::fromUtf8(deviceOutput).trimmed();
-              emit log(result);
-              emit message(result.contains("Success")
-                               ? "Application installed on your phone."
-                               : "Installation failed. " + result);
-            } else {
-              if (QImage::fromData(deviceOutput, "PNG").isNull()) {
-                emit message("The phone did not return a valid screenshot. "
-                             "Nothing was saved.");
-                return;
-              }
-              QSaveFile file(capturePath);
-              if (!file.open(QIODevice::WriteOnly) ||
-                  file.write(deviceOutput) != deviceOutput.size() ||
-                  !file.commit()) {
-                emit message("Could not save the screenshot. Check folder "
-                             "permissions and available space.");
-                return;
-              }
-              emit message("Screenshot saved to your capture library.");
-              emit captureSaved(capturePath);
-            }
-          });
+  connect(
+      &deviceTask, &QProcess::finished, this,
+      [this](int code, QProcess::ExitStatus status) {
+        deviceTimeout.stop();
+        deviceOutput += deviceTask.readAllStandardOutput();
+        if (deviceTimedOut || deviceAborted)
+          return;
+        if (code != 0 || status != QProcess::NormalExit) {
+          if (filePushTask)
+            emit filePushMessage(
+                "File transfer failed. See Diagnostics for details.");
+          emit message("Device operation failed. See Diagnostics for details.");
+          return;
+        }
+        if (commandTask) {
+          emit log(QString::fromUtf8(deviceOutput).trimmed());
+          emit message("Phone command completed.");
+        } else if (filePushTask) {
+          const auto result = QString::fromUtf8(deviceOutput).trimmed();
+          emit log(result);
+          const bool failed = result.contains("error", Qt::CaseInsensitive) ||
+                              result.contains("failed", Qt::CaseInsensitive) ||
+                              !result.contains("pushed", Qt::CaseInsensitive);
+          if (failed) {
+            emit filePushMessage(
+                "File transfer failed. See Diagnostics for details.");
+            emit message("File transfer failed. See Diagnostics for details.");
+          } else {
+            emit filePushMessage("File copied to " + pushDestination);
+            emit message("File copied to the Android destination.");
+          }
+        } else if (capturePath.isEmpty()) {
+          const auto result = QString::fromUtf8(deviceOutput).trimmed();
+          emit log(result);
+          emit message(result.contains("Success")
+                           ? "Application installed on your phone."
+                           : "Installation failed. " + result);
+        } else {
+          if (QImage::fromData(deviceOutput, "PNG").isNull()) {
+            emit message("The phone did not return a valid screenshot. "
+                         "Nothing was saved.");
+            return;
+          }
+          QSaveFile file(capturePath);
+          if (!file.open(QIODevice::WriteOnly) ||
+              file.write(deviceOutput) != deviceOutput.size() ||
+              !file.commit()) {
+            emit message("Could not save the screenshot. Check folder "
+                         "permissions and available space.");
+            return;
+          }
+          emit message("Screenshot saved to your capture library.");
+          emit captureSaved(capturePath);
+        }
+      });
 }
 
 Engine::~Engine() {
@@ -1962,8 +2002,10 @@ void Engine::capture(const QString &serial, const QString &path) {
     return;
   capturePath = path;
   commandTask = false;
+  filePushTask = false;
   deviceOutput.clear();
   deviceTimedOut = false;
+  deviceAborted = false;
   deviceTimeout.start(20000);
   emit message("Capturing phone screen…");
   deviceTask.start(preferences.adb,
@@ -1989,11 +2031,83 @@ void Engine::installApk(const QString &serial, const QString &path) {
   }
   capturePath.clear();
   commandTask = false;
+  filePushTask = false;
   deviceOutput.clear();
   deviceTimedOut = false;
+  deviceAborted = false;
   deviceTimeout.start(120000);
   emit message("Installing application on your phone…");
   deviceTask.start(preferences.adb, {"-s", serial, "install", path});
+}
+
+void Engine::pushFile(const QString &serial, const QString &path,
+                      const QString &destination) {
+  if (running() && serial != activeSerial) {
+    const auto text = "File transfer must target the active session phone.";
+    emit filePushMessage(text);
+    emit message(text);
+    return;
+  }
+  if (deviceBusy()) {
+    emit filePushMessage(
+        "Another device operation is in progress. Wait for it to finish.");
+    return;
+  }
+  if (!canUseDevice(serial)) {
+    emit filePushMessage("Choose an authorized device first.");
+    return;
+  }
+
+  const QFileInfo source(path);
+  if (!source.isFile() || !source.isReadable()) {
+    const auto text = "Choose an existing readable regular file.";
+    emit filePushMessage(text);
+    emit message(text);
+    return;
+  }
+  const auto rawDestination = destination.trimmed();
+  const auto cleanDestination = QDir::cleanPath(rawDestination);
+  const bool unsafeComponent =
+      rawDestination.split('/', Qt::KeepEmptyParts).contains(".") ||
+      rawDestination.split('/', Qt::KeepEmptyParts).contains("..");
+  const bool invalidDestination =
+      rawDestination.size() > 1024 || !rawDestination.startsWith('/') ||
+      cleanDestination == "/" || unsafeComponent ||
+      QRegularExpression("[\\x00-\\x1f\\x7f]").match(rawDestination).hasMatch();
+  if (invalidDestination) {
+    const auto text =
+        "Use an absolute Android directory without . or .. components.";
+    emit filePushMessage(text);
+    emit message(text);
+    return;
+  }
+
+  const auto targetDirectory = cleanDestination + '/';
+  capturePath.clear();
+  commandTask = false;
+  filePushTask = true;
+  pushDestination = targetDirectory + source.fileName();
+  deviceOutput.clear();
+  deviceTimedOut = false;
+  deviceAborted = false;
+  deviceTimeout.start(300000);
+  emit filePushMessage("Sending " + source.fileName() + " to " +
+                       targetDirectory + "…");
+  emit message("Sending file to the Android device…");
+  deviceTask.start(
+      preferences.adb,
+      {"-s", serial, "push", source.absoluteFilePath(), targetDirectory});
+}
+
+void Engine::cancelDeviceTask() {
+  if (deviceTask.state() == QProcess::NotRunning)
+    return;
+  deviceAborted = true;
+  deviceTimeout.stop();
+  deviceTask.kill();
+  if (filePushTask)
+    emit filePushMessage("File transfer canceled.");
+  emit message("Device operation canceled.");
 }
 
 bool Engine::controlAllowed() const {
@@ -2049,9 +2163,11 @@ void Engine::phoneAction(const QString &serial, PhoneAction action) {
     return;
   }
   commandTask = true;
+  filePushTask = false;
   capturePath.clear();
   deviceOutput.clear();
   deviceTimedOut = false;
+  deviceAborted = false;
   deviceTimeout.start(10000);
   deviceTask.start(preferences.adb,
                    {"-s", serial, "shell", "input", "keyevent", key});

@@ -23,7 +23,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Session lifecycle | Partial | First-frame state, graceful stop, recording finalization and disconnect/failure states. | Real unplug/reconnect and playable-recording tests on phones. |
 | Device workspace | Partial | USB discovery, wireless pair/connect, screenshots, APK install and selected-device targeting. | Complete pair-to-mirror guidance and broader recovery testing. |
 | Configuration routes | Partial | Searchable Video, Camera, Audio, Device, Window, Keyboard, Mouse, Gamepad, Recording and Virtual display categories. | Connection/Tunnels, Control, OTG, Video4Linux and complete Shortcuts routes. |
-| Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, inspected-app launch, Android/window rotation, reset video, mirror-window actions, rendered-FPS measurement and contextual camera controls. | Bounded file push actions. |
+| Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, inspected-app launch, one-file transfer, Android/window rotation, reset video, mirror-window actions, rendered-FPS measurement and contextual camera controls. | Decide whether multi-file drag/drop and transfer progress belong in release scope. |
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
 | Audio | Partial | Enablement, source, codec and buffers. | Duplication, encoder/bitrate, require-audio, audio-only and playback policies. |
 | Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior and UHID gamepad. | Mouse bindings, shortcut modifier, AOA modes, gesture help and peripheral tests. |
@@ -36,26 +36,25 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
 
-## Next implementation: bounded file push
+## Next implementation: complete advanced audio configuration
 
-Live inspected-app launch is complete in code. The next bounded workspace slice
-should transfer a deliberately chosen host file without inventing a file browser or
-passing user text through a shell.
+Bounded one-file transfer is complete in code. The next settings slice should expose
+the remaining everyday audio policies without turning the UI into a raw flag editor.
 
-1. Add a file chooser and an explicit, editable destination directory with a safe
-   default such as `/sdcard/Download/`; accept one regular file per operation first.
-2. Use argument-vector ADB push or scrcpy's existing file-pusher path. Never build a
-   shell command, and validate that the destination is absolute, normalized and free
-   of control characters before starting.
-3. Snapshot the active device serial when the transfer begins. Keep the operation
-   independent of the mirrored display, but require the same authorized phone and
-   prevent a later device selection from retargeting it.
-4. Show source name, destination, busy/success/failure and cancellation states. Do
-   not claim success solely from exit code zero if the tool output reports failure.
-5. Serialize against APK install, screenshots and other device tasks; define the
-   overwrite behavior explicitly and avoid exposing local paths in routine status.
-6. Test spaces/Unicode, missing and non-regular files, hostile destinations, device
-   changes, timeout/cancel, tool failure and the 920×680 layout before hardware QA.
+1. Add audio duplication, encoder, bit rate, require-audio and host-playback controls
+   to the existing Audio route, using the fork's typed preferences and argument list.
+2. Make duplication select the playback source as scrcpy does, explain its Android
+   13+ requirement, and prevent contradictory source/control states in the UI.
+3. Disable or explain bit rate and encoder fields for raw audio (and ignored bit rate
+   cases), while preserving saved values when a temporarily incompatible codec is
+   selected.
+4. Add an explicit audio-only workflow rather than asking users to infer a combination
+   of no-video/no-control/no-window flags. Keep recording and playback consequences
+   visible before launch.
+5. Extend validation and argument tests for every dependency, invalid numeric/text
+   value and persisted round trip. Retain the 920×680 no-horizontal-scroll contract.
+6. Hardware-test Android 11 fallback, Android 12 output capture, Android 13 duplication,
+   microphone sources, encoder fallback and recordings with host playback disabled.
 
 ## Release-proof still required for recent work
 
@@ -76,6 +75,10 @@ passing user text through a shell.
 - **Live app launch:** verify primary, selected secondary and newly created virtual
   displays on multiple Android versions, including a package with no launchable
   activity. A queue acknowledgement does not prove foreground launch.
+- **File transfer:** push small and multi-gigabyte files, filenames and destinations
+  with spaces/Unicode, replacement of an existing filename, cancellation and storage-
+  permission failures over USB and wireless ADB on Linux, Windows and macOS. Automated
+  tests prove command construction and state handling, not bytes written by a phone.
 - **Cross-platform bridge:** exercise stdin commands and shutdown on Windows; validate
   the app bundle and pipe behavior on macOS.
 - **Host branding:** confirm Desktop/Laptop selection on Windows hardware and both
