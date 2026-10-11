@@ -26,7 +26,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, inspected-app launch, one-file transfer, Android/window rotation, reset video, mirror-window actions, rendered-FPS measurement and contextual camera controls. | Decide whether multi-file drag/drop and transfer progress belong in release scope. |
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
 | Audio | Partial | Enablement, all capture sources, Android playback duplication, codec-matched inspected/manual encoder, bitrate, require-audio, host playback/buffers, first-packet-backed audio-only sessions and codec-safe dedicated recording formats. | Physical-device output and playable-file proof. |
-| Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior, UHID gamepad, validated shortcut modifier, complete shortcut/gesture reference, clipboard policies and mirror-drop target. | Mouse bindings, AOA modes and real peripheral/clipboard/drop tests. |
+| Input | Partial | SDK/UHID/AOA/disabled keyboard and mouse, UHID/AOA gamepad, visual mouse-binding map, key behavior, validated shortcut modifier, complete shortcut/gesture reference, clipboard policies and mirror-drop target. | Real USB peripherals plus clipboard/drop behavior on supported platforms. |
 | Virtual display | Partial | Creation, size/DPI, flex, searchable inspected-app picker, manual package fallback, IME, decorations and close policy. | Android 10+ hardware journeys. |
 | Camera | Partial | Source, ID/facing, guided declared size/FPS/high-speed choices, manual fallback, startup torch/zoom and live torch/zoom. | Android-version/capability gates and real camera tests. |
 | Recording | Partial | Mode-specific MKV/MP4/MKA/M4A/OPUS/AAC/FLAC/WAV, codec validation, migration, unique paths, filters and graceful finalization state. | Playback verification of real files after normal and abnormal endings. |
@@ -71,15 +71,30 @@ Android versions; APK/non-APK drag/drop into the native mirror; modifier conflic
 Windows/macOS Super-key naming. The toolbar classification remains documented in the
 feature map and its mutating paths remain covered by existing read-only tests.
 
-## Next implementation: advanced mouse and AOA input
+## Advanced mouse and AOA checkpoint
 
-1. Add validated primary/Shift mouse binding sequences with a visual four-button map.
-2. Expose AOA keyboard, mouse and gamepad only for compatible USB sessions; do not
-   present it as working over wireless ADB.
-3. Explain SDK capture, UHID cursor behavior, secondary-click forwarding and recovery
-   when a phone or desktop driver rejects a physical input mode.
-4. Add argument/dependency/layout coverage, then verify real mice, keyboards and
-   controllers over USB on Linux and Windows before starting the separate OTG mode.
+Mouse bindings now validate the four primary and four Shift actions and render them as
+a live Right/Middle/4th/5th-button map. Empty bindings show the correct SDK or physical-
+mouse defaults. Keyboard, mouse and gamepad expose AOA, but session startup rejects it
+for wireless or remote ADB. Windows explicitly reserves AOA for OTG because ADB and
+AOA cannot share the mirrored USB device there. Tests cover arguments, persistence,
+the live map, disabled dependencies, transport rejection and 920×680 layout.
+
+Manual proof still required: SDK/UHID/AOA typing and pointer capture with real hardware;
+secondary and Shift mouse buttons; multiple gamepads; disconnect recovery; Linux/macOS
+AOA mirroring; and the expected Windows rejection. Driver or phone permission failures
+must remain visible rather than being reported as successful input attachment.
+
+## Next implementation: dedicated OTG control mode
+
+1. Add a separate “USB control only” session type with no video/audio promises and no
+   dependency on an ADB-authorized device.
+2. Discover eligible local USB devices through the engine/libusb path and distinguish
+   them from the existing ADB list; never infer OTG eligibility from an ADB serial.
+3. Launch `--otg` with AOA keyboard/mouse/gamepad choices, truthful Windows driver
+   guidance, stop/reconnect lifecycle and no mirror-only toolbar controls.
+4. Add fake-process lifecycle and UI coverage, then verify with USB debugging disabled
+   on real Linux and Windows hardware before marking ticket 22 implemented.
 
 ## Release-proof still required for recent work
 
@@ -98,6 +113,9 @@ feature map and its mutating paths remain covered by existing read-only tests.
 - **Shortcuts and mirror drop:** verify custom modifiers and Super-key conflicts on
   each desktop platform; drop APK/non-APK files on the native mirror and confirm the
   configured Android destination. Automated tests only prove arguments and UI routes.
+- **Input peripherals:** verify SDK/UHID/AOA keyboard, pointer capture, all secondary
+  mouse/Shift bindings, multiple gamepads and disconnect recovery. AOA mirroring needs
+  local-USB proof on Linux/macOS and expected rejection proof on Windows.
 - **Rendered FPS:** compare structured samples with scrcpy's ordinary FPS log on
   display, read-only and camera sessions; verify skipped-frame reporting under load
   and clean stop/disconnect behavior on all desktop platforms.

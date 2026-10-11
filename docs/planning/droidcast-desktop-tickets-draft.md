@@ -124,7 +124,7 @@ these broader tickets complete.
     - **Verification:** Actual supported audio capture/playback plus source failures and no-audio paths; no success based solely on process launch.
 
 19. **Use the full keyboard, mouse and gamepad mode set**
-    - **Status:** Control/Shortcuts routes and SDK/UHID basics implemented; mouse bindings, AOA and hardware proof remain.
+    - **Status:** SDK/UHID/AOA choices, mouse bindings and Control/Shortcuts routes implemented; real peripheral/platform proof remains.
     - **Blocked by:** 13, category routes.
     - **What it delivers:** SDK/UHID/AOA/disabled modes where supported, text/key behavior, hover/repeat, mouse bindings, gamepad modes and shortcut modifier controls.
     - **Acceptance:** AOA is USB-only; OTG remains a separate mode; input conflicts validate before launch; gesture help describes SDK-mode limits; physical-keyboard settings and documented shortcuts are discoverable.

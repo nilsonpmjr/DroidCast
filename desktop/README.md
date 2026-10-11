@@ -109,7 +109,10 @@ Windows/macOS build paths have not yet been exercised.
   complete shortcut reference, a validated configurable modifier, clipboard
   synchronization and compatibility-paste policies, a safe mirror-window drop
   destination, and routes to advanced Control, keyboard, mouse and gamepad
-  settings. The default shortcut modifier remains left Alt / left Super.
+  settings. A visual four-button map validates primary/Shift mouse bindings.
+  AOA keyboard, mouse and gamepad choices are restricted to local USB sessions;
+  Windows keeps AOA for the future OTG-only path. The default shortcut modifier
+  remains left Alt / left Super.
 - **Settings:** searchable categories for video, camera, audio, control, device,
   window, keyboard, mouse, gamepad, shortcuts, recording and virtual displays. Includes read-only
   mode, buffering, orientation,

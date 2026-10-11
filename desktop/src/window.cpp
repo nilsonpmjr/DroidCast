@@ -10,6 +10,7 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QGridLayout>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -1032,17 +1033,27 @@ QWidget *Window::inputPage() {
   for (auto pair :
        {qMakePair(QString("Keyboard simulation"), &Preferences::keyboard),
         qMakePair(QString("Mouse simulation"), &Preferences::mouse)}) {
+    const bool keyboard = pair.second == &Preferences::keyboard;
     QVBoxLayout *content;
     auto *box = card(content);
     content->addWidget(label(pair.first, "section"));
     content->addWidget(
         label("Standard mode uses Android input events. Physical mode uses "
-              "UHID to simulate hardware attached to the phone.",
+              "UHID through Android. AOA talks directly over local USB and "
+              "cannot be used through wireless or remote ADB.",
               "muted"));
     auto *mode = new QComboBox;
+    mode->setObjectName(keyboard ? "keyboardMode" : "mouseMode");
+    if (!keyboard)
+      mouseModeSelector = mode;
     mode->setAccessibleName(pair.first);
     mode->addItem("Standard · SDK", "sdk");
     mode->addItem("Physical device · UHID", "uhid");
+#ifdef Q_OS_WIN
+    mode->addItem("Physical USB · AOA (OTG only on Windows)", "aoa");
+#else
+    mode->addItem("Physical USB · AOA", "aoa");
+#endif
     mode->addItem("Disabled", "disabled");
     mode->setCurrentIndex(mode->findData(engine.preferences.*pair.second));
     content->addWidget(mode);
@@ -1053,6 +1064,16 @@ QWidget *Window::inputPage() {
             });
     layout->addWidget(box);
   }
+#ifdef Q_OS_WIN
+  const auto aoaHelp =
+      "AOA cannot share a mirrored USB phone with ADB on Windows. Use "
+      "SDK/UHID here; AOA will become usable in the separate OTG mode.";
+#else
+  const auto aoaHelp =
+      "AOA requires the selected phone to be attached to this computer by "
+      "USB. The future OTG mode will use it without mirroring or ADB.";
+#endif
+  layout->addWidget(label(aoaHelp, "muted"));
   auto *advancedInput =
       button("Keyboard, mouse && gamepad settings", "settings");
   advancedInput->setObjectName("advancedInputSettings");
@@ -1481,6 +1502,67 @@ QWidget *Window::settingsPage() {
       if (validation)
         fields->addRow(validation);
       fields->addRow(label(option.help, "muted"));
+    }
+    if (category == "Mouse") {
+      auto *binding = group->findChild<QLineEdit *>("option-mouse-bind");
+      auto *mouseMode = mouseModeSelector;
+      auto *map = new QWidget;
+      map->setObjectName("mouseBindingMap");
+      auto *grid = new QGridLayout(map);
+      grid->setContentsMargins(0, 4, 0, 4);
+      grid->setHorizontalSpacing(10);
+      grid->setVerticalSpacing(8);
+      for (int column = 0; column < 4; ++column)
+        grid->addWidget(label(QStringList{"Right", "Middle", "Button 4",
+                                          "Button 5"}[column],
+                              "muted"),
+                        0, column + 1);
+      grid->addWidget(label("Click", "muted"), 1, 0);
+      grid->addWidget(label("Shift + click", "muted"), 2, 0);
+      QList<QLabel *> actions;
+      for (int row = 0; row < 2; ++row)
+        for (int column = 0; column < 4; ++column) {
+          auto *action = label({}, "badge");
+          action->setObjectName(
+              QString("mouseBinding-%1-%2").arg(row).arg(column));
+          action->setAccessibleName(
+              QString("%1 %2 mouse button action")
+                  .arg(row ? "Shift plus" : "Primary",
+                       QStringList{"right", "middle", "fourth",
+                                   "fifth"}[column]));
+          grid->addWidget(action, row + 1, column + 1);
+          actions.append(action);
+        }
+      fields->addRow(label("Button map", "body"), map);
+      fields->addRow(
+          label("+ Forward · − Ignore · B Back · H Home · S Recents · N "
+                "Notifications. Physical modes reverse the SDK defaults.",
+                "muted"));
+      auto updateMap = [binding, mouseMode, actions] {
+        auto value = binding->text().trimmed();
+        QString primary, shifted;
+        if (value.isEmpty()) {
+          const bool sdk = mouseMode->currentData().toString() == "sdk";
+          primary = sdk ? "bhsn" : "++++";
+          shifted = sdk ? "++++" : "bhsn";
+        } else {
+          const auto parts = value.split(':');
+          primary = parts.value(0);
+          shifted = parts.size() > 1 ? parts[1] : primary;
+        }
+        const QMap<QChar, QString> names{{'+', "Forward"}, {'-', "Ignore"},
+                                         {'b', "Back"},    {'h', "Home"},
+                                         {'s', "Recents"}, {'n', "Notify"}};
+        for (int i = 0; i < actions.size(); ++i) {
+          const auto sequence = i < 4 ? primary : shifted;
+          actions[i]->setText(i % 4 < sequence.size()
+                                  ? names.value(sequence[i % 4], "Invalid")
+                                  : "Invalid");
+        }
+      };
+      connect(binding, &QLineEdit::textChanged, this, updateMap);
+      connect(mouseMode, &QComboBox::currentIndexChanged, this, updateMap);
+      updateMap();
     }
     if (category == "Video" || category == "Audio" || category == "Camera" ||
         category == "Virtual display") {

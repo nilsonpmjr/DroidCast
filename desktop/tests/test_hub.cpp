@@ -1479,12 +1479,14 @@ private slots:
     prefs.options = {{"key-injection", "prefer-text"},
                      {"no-key-repeat", true},
                      {"no-mouse-hover", true},
+                     {"mouse-bind", "++bh:++sn"},
                      {"gamepad", "uhid"}};
     auto args = mirrorArguments("PHONE123", prefs);
     QVERIFY(args.contains("--prefer-text"));
     QVERIFY(!args.contains("--raw-key-events"));
     QVERIFY(args.contains("--no-key-repeat"));
     QVERIFY(args.contains("--no-mouse-hover"));
+    QVERIFY(args.contains("--mouse-bind=++bh:++sn"));
     QVERIFY(args.contains("--gamepad=uhid"));
     prefs.options["key-injection"] = "raw-key-events";
     args = mirrorArguments("PHONE123", prefs);
@@ -1495,14 +1497,71 @@ private slots:
     QVERIFY(!args.contains("--raw-key-events"));
     QVERIFY(!args.contains("--no-key-repeat"));
     QVERIFY(!args.contains("--no-mouse-hover"));
+    QVERIFY(args.contains("--mouse-bind=++bh:++sn"));
+    prefs.keyboard = prefs.mouse = "aoa";
+    prefs.options["gamepad"] = "aoa";
+    args = mirrorArguments("PHONE123", prefs);
+    QVERIFY(args.contains("--keyboard=aoa"));
+    QVERIFY(args.contains("--mouse=aoa"));
+    QVERIFY(args.contains("--gamepad=aoa"));
+    QVERIFY(args.contains("--mouse-bind=++bh:++sn"));
+    QSettings aoaSettings(storage.filePath("aoa-inputs.ini"),
+                          QSettings::IniFormat);
+    prefs.save(aoaSettings);
+    const auto aoaRestored = Preferences::load(aoaSettings);
+    QCOMPARE(aoaRestored.keyboard, QString("aoa"));
+    QCOMPARE(aoaRestored.mouse, QString("aoa"));
+    QCOMPARE(aoaRestored.options.value("gamepad").toString(), QString("aoa"));
+    prefs.mouse = "sdk";
+    prefs.options["mouse-bind"] = "bad";
+    QCOMPARE(sessionIssue(prefs).key, QString("mouse-bind"));
+    QVERIFY(!mirrorArguments("PHONE123", prefs)
+                 .join(' ')
+                 .contains("--mouse-bind="));
+    prefs.mouse = "aoa";
+    prefs.options["mouse-bind"] = "++bh:++sn";
     prefs.options["no-control"] = true;
-    QVERIFY(!mirrorArguments("PHONE123", prefs).contains("--gamepad=uhid"));
+    QVERIFY(!mirrorArguments("PHONE123", prefs).contains("--gamepad=aoa"));
     prefs.keyboard = prefs.mouse = "disabled";
     QSettings settings(storage.filePath("inputs.ini"), QSettings::IniFormat);
     prefs.save(settings);
     const auto restored = Preferences::load(settings);
     QCOMPARE(restored.keyboard, QString("disabled"));
     QCOMPARE(restored.mouse, QString("disabled"));
+  }
+  void aoaSessionsRequireLocalUsbAndRespectPlatformLimits() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.keyboard = "aoa";
+    QSignalSpy messages(&engine, &Engine::message);
+    engine.devices = {
+        {"phone.local:5555", "device", "Wireless phone", "Wireless"}};
+    QVERIFY(!engine.start("phone.local:5555"));
+    QVERIFY(messages.last().first().toString().contains("local USB"));
+    engine.preferences.options["no-control"] = true;
+    QVERIFY(engine.start("phone.local:5555"));
+    QTRY_COMPARE_WITH_TIMEOUT(engine.sessionState(),
+                              Engine::SessionState::Streaming, 3000);
+    engine.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 6000);
+    engine.preferences.options["no-control"] = false;
+
+    engine.devices = {{"PHONE123", "device", "USB phone", "USB"}};
+    engine.preferences.remoteAdb = true;
+    engine.preferences.adbServerEndpoint = "remote.example:5037";
+    QVERIFY(!engine.start("PHONE123"));
+    QVERIFY(messages.last().first().toString().contains("local USB"));
+    engine.preferences.remoteAdb = false;
+#ifdef Q_OS_WIN
+    QVERIFY(!engine.start("PHONE123"));
+    QVERIFY(messages.last().first().toString().contains("OTG"));
+#else
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE_WITH_TIMEOUT(engine.sessionState(),
+                              Engine::SessionState::Streaming, 3000);
+    engine.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 6000);
+#endif
   }
   void controlAndShortcutOptionsStaySafeAndSeparate() {
     Preferences prefs;
@@ -1662,6 +1721,65 @@ private slots:
     QVERIFY(!window.findChild<QComboBox *>("option-gamepad")->isEnabled());
     readOnly->setChecked(false);
     QVERIFY(window.findChild<QComboBox *>("option-gamepad")->isEnabled());
+  }
+  void mouseBindingMapAndAoaChoicesStayContextual() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(4);
+    auto *keyboard = window.findChild<QComboBox *>("keyboardMode");
+    auto *mouse = window.findChild<QComboBox *>("mouseMode");
+    auto *gamepad = window.findChild<QComboBox *>("option-gamepad");
+    QVERIFY(keyboard && mouse && gamepad);
+    QVERIFY(keyboard->findData("aoa") >= 0);
+    QVERIFY(mouse->findData("aoa") >= 0);
+    QVERIFY(gamepad->findText("aoa") >= 0);
+    mouse->setCurrentIndex(mouse->findData("uhid"));
+
+    window.showPage(5);
+    window.findChild<QComboBox *>("settingsCategory")->setCurrentText("Mouse");
+    auto *binding = window.findChild<QLineEdit *>("option-mouse-bind");
+    auto *map = window.findChild<QWidget *>("mouseBindingMap");
+    QVERIFY(binding && map && binding->isEnabled() && map->isVisible());
+    for (int column = 0; column < 4; ++column)
+      QCOMPARE(
+          window.findChild<QLabel *>(QString("mouseBinding-0-%1").arg(column))
+              ->text(),
+          QString("Forward"));
+    QCOMPARE(window.findChild<QLabel *>("mouseBinding-1-0")->text(),
+             QString("Back"));
+    QCOMPARE(window.findChild<QLabel *>("mouseBinding-1-1")->text(),
+             QString("Home"));
+    binding->setText("++bh:++sn");
+    QCOMPARE(window.findChild<QLabel *>("mouseBinding-0-2")->text(),
+             QString("Back"));
+    QCOMPARE(window.findChild<QLabel *>("mouseBinding-0-3")->text(),
+             QString("Home"));
+    QCOMPARE(window.findChild<QLabel *>("mouseBinding-1-2")->text(),
+             QString("Recents"));
+    QCOMPARE(window.findChild<QLabel *>("mouseBinding-1-3")->text(),
+             QString("Notify"));
+    binding->setText("invalid");
+    QMetaObject::invokeMethod(binding, "editingFinished", Qt::DirectConnection);
+    QVERIFY(!window.findChild<QLabel *>("error-mouse-bind")->isHidden());
+    binding->setText("bhsn:++++");
+    QMetaObject::invokeMethod(binding, "editingFinished", Qt::DirectConnection);
+    QVERIFY(window.findChild<QLabel *>("error-mouse-bind")->isHidden());
+    mouse->setCurrentIndex(mouse->findData("disabled"));
+    QVERIFY(!binding->isEnabled());
+    mouse->setCurrentIndex(mouse->findData("aoa"));
+    QVERIFY(binding->isEnabled());
+    settings.sync();
+    QCOMPARE(settings.value("session/mouse").toString(), QString("aoa"));
+    QCOMPARE(settings.value("options/mouse-bind").toString(),
+             QString("bhsn:++++"));
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    bundledPreferences().save(settings);
   }
   void controlAndShortcutRoutesAreCompleteValidatedAndFit() {
     QSettings settings;

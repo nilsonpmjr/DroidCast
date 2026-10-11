@@ -191,13 +191,22 @@ const QList<SessionOption> &sessionOptions() {
        "SDK mouse only. Send pointer movement only while clicking or dragging.",
        false,
        {}},
+      {"mouse-bind",
+       "Mouse",
+       "Secondary mouse buttons",
+       "Optional primary[:Shift] map for right, middle, 4th and 5th buttons. "
+       "Use + to forward, - to ignore, b for Back, h for Home, s for Recents "
+       "and n for notifications. Empty uses the selected mouse mode defaults.",
+       QString(""),
+       {}},
       {"gamepad",
        "Gamepad",
        "Gamepad forwarding",
-       "UHID simulates a physical gamepad on Android. Requires phone UHID "
-       "support; disabled in read-only mode.",
+       "UHID works through Android and may work wirelessly. AOA uses direct "
+       "local USB and is unavailable for wireless/remote sessions; disabled "
+       "in read-only mode.",
        "disabled",
-       {"disabled", "uhid"}},
+       {"disabled", "uhid", "aoa"}},
       {"record-format",
        "Recording",
        "Video recording container",
@@ -431,7 +440,8 @@ bool sessionOptionAvailable(const SessionOption &option, const Preferences &p) {
   if (option.category == "Keyboard")
     return !camera && !readOnly && p.keyboard == "sdk";
   if (option.category == "Mouse")
-    return !camera && !readOnly && p.mouse == "sdk";
+    return !camera && !readOnly && p.mouse != "disabled" &&
+           (option.key != "no-mouse-hover" || p.mouse == "sdk");
   if (option.category == "Gamepad")
     return !camera && !readOnly;
   if (option.category == "Audio") {
@@ -583,6 +593,12 @@ QString textOptionError(const QString &key, const QString &value) {
         unique.insert(modifier);
     if (keys.isEmpty() || keys.size() > allowed.size())
       return "Choose at least one supported shortcut modifier.";
+  } else if (key == "mouse-bind" &&
+             !QRegularExpression("\\A[+bhsn-]{4}(?::[+bhsn-]{4})?\\z")
+                  .match(value)
+                  .hasMatch()) {
+    return "Use four actions, optionally followed by : and four Shift "
+           "actions. Allowed characters: + - b h s n.";
   }
   return {};
 }
@@ -660,10 +676,12 @@ Preferences Preferences::load(QSettings &s) {
   p.fps = qBound(1, s.value("session/fps", p.fps).toInt(), 240);
   p.bitrate = qBound(1, s.value("session/bitrate", p.bitrate).toInt(), 200);
   p.keyboard = s.value("session/keyboard", p.keyboard).toString();
-  if (p.keyboard != "sdk" && p.keyboard != "uhid" && p.keyboard != "disabled")
+  if (p.keyboard != "sdk" && p.keyboard != "uhid" && p.keyboard != "aoa" &&
+      p.keyboard != "disabled")
     p.keyboard = "sdk";
   p.mouse = s.value("session/mouse", p.mouse).toString();
-  if (p.mouse != "sdk" && p.mouse != "uhid" && p.mouse != "disabled")
+  if (p.mouse != "sdk" && p.mouse != "uhid" && p.mouse != "aoa" &&
+      p.mouse != "disabled")
     p.mouse = "sdk";
   p.codec = s.value("session/codec", p.codec).toString();
   if (!QStringList{"h264", "h265", "av1"}.contains(p.codec))
@@ -1589,14 +1607,35 @@ bool Engine::start(const QString &serial, const QString &recording) {
     emit message(issue.message);
     return false;
   }
-  bool authorized = false;
+  const Device *selectedDevice = nullptr;
   for (const auto &device : devices)
     if (device.serial == serial && device.ready())
-      authorized = true;
-  if (!authorized) {
+      selectedDevice = &device;
+  if (!selectedDevice) {
     emit message("Select an authorized device before starting a session.");
     return false;
   }
+  const bool acceptsInput =
+      !preferences.options.value("audio-only", false).toBool() &&
+      !preferences.options.value("no-control", false).toBool() &&
+      preferences.options.value("video-source", "display") != "camera";
+  const bool usesAoa =
+      acceptsInput &&
+      (preferences.keyboard == "aoa" || preferences.mouse == "aoa" ||
+       preferences.options.value("gamepad") == "aoa");
+  if (usesAoa &&
+      (preferences.remoteAdb || selectedDevice->connection != "USB")) {
+    emit message("AOA input requires a phone connected by local USB. Choose "
+                 "SDK/UHID for wireless or remote ADB sessions.");
+    return false;
+  }
+#ifdef Q_OS_WIN
+  if (usesAoa) {
+    emit message("AOA cannot share a mirrored USB phone with ADB on Windows. "
+                 "Choose SDK/UHID; dedicated OTG mode is planned separately.");
+    return false;
+  }
+#endif
   if (executablePath(preferences.scrcpy).isEmpty() ||
       executablePath(preferences.adb).isEmpty()) {
     emit message("DroidCast's engine bundle is incomplete. Reinstall the "

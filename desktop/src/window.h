@@ -38,10 +38,11 @@ private:
   QLineEdit *pushDestination;
   QPlainTextEdit *logs;
   QComboBox *captureFilter,
-      *sessionAppSelector = nullptr, *cameraIdSelector = nullptr,
-      *cameraSizeSelector = nullptr, *cameraFpsSelector = nullptr,
-      *displaySelector = nullptr, *videoEncoderSelector = nullptr,
-      *audioEncoderSelector = nullptr, *appSelector = nullptr;
+      *mouseModeSelector = nullptr, *sessionAppSelector = nullptr,
+      *cameraIdSelector = nullptr, *cameraSizeSelector = nullptr,
+      *cameraFpsSelector = nullptr, *displaySelector = nullptr,
+      *videoEncoderSelector = nullptr, *audioEncoderSelector = nullptr,
+      *appSelector = nullptr;
   QString fingerprint, cameraCapabilitySerial, deviceCapabilitySerial,
       appCapabilitySerial, pendingPushPath;
   QList<CameraCapability> cameraCapabilities;

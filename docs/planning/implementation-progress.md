@@ -473,3 +473,22 @@ device compatibility testing remain open.
 - Added argument, invalid-input exclusion, persistence, inline validation, direct-route,
   reference completeness and 920×680 layout tests. Real clipboard, drag/drop, modifier
   conflict and cross-platform key-name proof remains in the gap register.
+
+## Part 24: advanced mouse bindings and guarded AOA input
+
+- Added AOA alongside SDK/UHID/disabled keyboard and mouse modes and alongside disabled/
+  UHID gamepad forwarding. Persisted input-mode normalization now accepts AOA instead
+  of silently migrating it back to SDK.
+- Guarded mirrored AOA sessions at the engine boundary: the selected device must be a
+  local USB device and the ADB route must be local. Wireless/remote starts fail with a
+  corrective SDK/UHID message. Windows rejects mirrored AOA with an explicit future-
+  OTG explanation because ADB already owns the USB device there.
+- Added validated `--mouse-bind` support for four primary and optional four Shift
+  actions. Invalid lengths/actions are omitted and block launch; values remain a single
+  argument and never pass through a shell.
+- Built a live two-row button map for Right, Middle, Button 4 and Button 5. Empty input
+  visualizes `bhsn:++++` for SDK and `++++:bhsn` for UHID/AOA, while custom bindings
+  immediately resolve to Forward, Ignore, Back, Home, Recents or Notifications.
+- Added argument, persistence, local-USB/remote/wireless/platform guard, dependency,
+  live-map and 920×680 tests. Real keyboards, mice, gamepads, drivers and phone USB
+  behavior remain release-proof work.
