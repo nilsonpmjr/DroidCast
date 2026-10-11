@@ -3,6 +3,7 @@
 #include <QMap>
 #include <QObject>
 #include <QProcess>
+#include <QProcessEnvironment>
 #include <QSettings>
 #include <QTimer>
 #include <QVariantMap>
@@ -54,6 +55,9 @@ struct Preferences {
   int size = 1080, fps = 60, bitrate = 8;
   QString keyboard = "sdk", codec = "h264", mouse = "sdk", mediaDirectory;
   bool audio = true, awake = false, screenOff = false, top = false;
+  bool remoteAdb = false, forceAdbForward = false;
+  QString adbServerEndpoint, tunnelHost;
+  int tunnelPort = 0;
   QVariantMap options;
   static Preferences load(QSettings &settings);
   void save(QSettings &settings) const;
@@ -71,6 +75,9 @@ QList<Device> parseDevices(const QString &output);
 QStringList mirrorArguments(const QString &serial, const Preferences &prefs,
                             const QString &recording = {});
 bool validEndpoint(const QString &endpoint);
+bool validIpv4Address(const QString &address);
+QString connectionIssue(const Preferences &prefs);
+QString adbServerSocket(const Preferences &prefs);
 QString executablePath(const QString &program);
 QString runtimeDirectory();
 Preferences bundledPreferences();
@@ -205,12 +212,16 @@ private:
        activeAudioPlayback = true;
   bool deviceTimedOut = false, deviceAborted = false;
   bool canUseDevice(const QString &serial);
+  QProcessEnvironment processEnvironment(bool scrcpy) const;
+  void prepareAdbProcess(QProcess &process) const;
   bool stopping = false, scanTimedOut = false, wirelessTimedOut = false;
   SessionState state = SessionState::Idle;
   bool forcedStop = false, bridgeReady = false, recordingFinalized = false,
        recordingFailed = false, audioLifecycleReady = false,
        audioLifecycleFailure = false;
   QByteArray sessionToken, mirrorOutput;
+  QString activeAdbServerSocket;
+  bool activeTransportPinned = false;
   QTimer bridgeCommandTimeout;
   bool windowCommandsReady = false, windowCommandsHealthy = true;
   bool cameraCommandsReady = false, cameraCommandsHealthy = true;

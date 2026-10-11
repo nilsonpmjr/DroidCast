@@ -48,7 +48,11 @@ private slots:
     server.close();
     applyTheme(*qobject_cast<QApplication *>(QCoreApplication::instance()));
   }
-  void init() { qunsetenv("HUB_TEST_MODE"); }
+  void init() {
+    qunsetenv("HUB_TEST_MODE");
+    qunsetenv("HUB_ENV_LOG");
+    qunsetenv("ADB_SERVER_SOCKET");
+  }
   void parsesStructuredCameraCapabilitiesDefensively() {
     const auto cameras = parseCameraCapabilities(
         "noise before report\nList of cameras:\n"
@@ -1587,7 +1591,7 @@ private slots:
     auto saved = migrated;
     saved.options["audio-record-format"] = "flac";
     saved.save(legacy);
-    QCOMPARE(legacy.value("metadata/settings-version").toInt(), 3);
+    QCOMPARE(legacy.value("metadata/settings-version").toInt(), 4);
     QCOMPARE(Preferences::load(legacy)
                  .options.value("audio-record-format")
                  .toString(),
@@ -1985,6 +1989,53 @@ private slots:
                           "host:5555; ls", "host", "host:1\n"})
       QVERIFY(!validEndpoint(s));
   }
+  void connectionRoutesValidatePersistAndBuildArguments() {
+    Preferences p;
+    QVERIFY(connectionIssue(p).isEmpty());
+    QVERIFY(adbServerSocket(p).isEmpty());
+    QVERIFY(validIpv4Address("127.0.0.1"));
+    QVERIFY(validIpv4Address("255.255.255.255"));
+    for (const auto &address :
+         {"", "127.0.0", "127.00.0.1", "256.0.0.1", "localhost"})
+      QVERIFY(!validIpv4Address(address));
+
+    p.remoteAdb = true;
+    QCOMPARE(connectionIssue(p),
+             QString("Enter the remote ADB server as host:port."));
+    p.adbServerEndpoint = "adb.example:5037";
+    QVERIFY(connectionIssue(p).isEmpty());
+    QCOMPARE(adbServerSocket(p), QString("tcp:adb.example:5037"));
+    p.tunnelHost = "127.0.0.1";
+    p.tunnelPort = 27183;
+    QVERIFY(connectionIssue(p).isEmpty());
+    auto args = mirrorArguments("PHONE123", p);
+    QVERIFY(!args.contains("--force-adb-forward"));
+    QVERIFY(args.contains("--tunnel-host=127.0.0.1"));
+    QVERIFY(args.contains("--tunnel-port=27183"));
+    p.forceAdbForward = true;
+    args = mirrorArguments("PHONE123", p);
+    QVERIFY(args.contains("--force-adb-forward"));
+    p.tunnelHost = "999.0.0.1";
+    QVERIFY(connectionIssue(p).contains("IPv4"));
+
+    p.tunnelHost = "127.0.0.1";
+    QSettings settings(storage.filePath("connection.ini"),
+                       QSettings::IniFormat);
+    p.save(settings);
+    const auto restored = Preferences::load(settings);
+    QCOMPARE(settings.value("metadata/settings-version").toInt(), 4);
+    QVERIFY(restored.remoteAdb);
+    QCOMPARE(restored.adbServerEndpoint, QString("adb.example:5037"));
+    QVERIFY(restored.forceAdbForward);
+    QCOMPARE(restored.tunnelHost, QString("127.0.0.1"));
+    QCOMPARE(restored.tunnelPort, 27183);
+
+    p.remoteAdb = false;
+    QVERIFY(connectionIssue(p).isEmpty());
+    args = mirrorArguments("PHONE123", p);
+    QVERIFY(!args.contains("--force-adb-forward"));
+    QVERIFY(!args.join(' ').contains("--tunnel-"));
+  }
   void persistence() {
     QSettings settings(storage.filePath("preferences.ini"),
                        QSettings::IniFormat);
@@ -2022,6 +2073,86 @@ private slots:
     QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 7000);
     QTRY_VERIFY(engine.activeSerial.isEmpty());
   }
+  void connectionRouteReachesEveryProcessAndStaysPinned() {
+    const auto environmentLog = storage.filePath("connection-environment.log");
+    QFile::remove(environmentLog);
+    qputenv("HUB_ENV_LOG", environmentLog.toUtf8());
+    qputenv("ADB_SERVER_SOCKET", "tcp:inherited.example:5037");
+
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.remoteAdb = true;
+    engine.preferences.adbServerEndpoint = "remote.example:5037";
+    engine.preferences.forceAdbForward = true;
+    engine.preferences.tunnelHost = "127.0.0.1";
+    engine.preferences.tunnelPort = 27183;
+    QSignalSpy found(&engine, &Engine::devicesChanged);
+    engine.refresh();
+    QVERIFY(found.wait());
+    QCOMPARE(engine.devices.size(), 2);
+
+    engine.connectWireless("phone.local:5555");
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.wirelessBusy(), 3000);
+    QSignalSpy inspection(&engine, &Engine::inspectionResult);
+    engine.inspectDevice("PHONE123");
+    QTRY_VERIFY_WITH_TIMEOUT(inspection.size() >= 2, 3000);
+
+    QSignalSpy saved(&engine, &Engine::captureSaved);
+    engine.capture("PHONE123", storage.filePath("route-shot.png"));
+    QVERIFY(saved.wait(3000));
+    QFile apk(storage.filePath("route-test.apk"));
+    QVERIFY(apk.open(QIODevice::WriteOnly));
+    apk.write("test");
+    apk.close();
+    engine.installApk("PHONE123", apk.fileName());
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.deviceBusy(), 3000);
+    QFile transfer(storage.filePath("route-transfer.txt"));
+    QVERIFY(transfer.open(QIODevice::WriteOnly));
+    transfer.write("test");
+    transfer.close();
+    engine.pushFile("PHONE123", transfer.fileName(), "/sdcard/Download");
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.deviceBusy(), 3000);
+
+    QVERIFY(engine.start("PHONE123"));
+    QTRY_COMPARE_WITH_TIMEOUT(engine.sessionState(),
+                              Engine::SessionState::Streaming, 3000);
+    engine.preferences.adbServerEndpoint = "changed.example:5037";
+    engine.phoneAction("PHONE123", Engine::PhoneAction::Home);
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.deviceBusy(), 3000);
+    engine.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 6000);
+    const int scans = found.size();
+    engine.refresh();
+    QTRY_VERIFY_WITH_TIMEOUT(found.size() > scans, 3000);
+
+    QFile log(environmentLog);
+    QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
+    const auto lines =
+        QString::fromUtf8(log.readAll()).split('\n', Qt::SkipEmptyParts);
+    QVERIFY2(lines.size() >= 9, qPrintable(lines.join('\n')));
+    for (int i = 0; i < lines.size() - 1; ++i)
+      QCOMPARE(lines[i].section('\t', 1, 1),
+               QString("tcp:remote.example:5037"));
+    QCOMPARE(lines.last().section('\t', 1, 1),
+             QString("tcp:changed.example:5037"));
+    QVERIFY(lines.join('\n').contains("connect|phone.local:5555"));
+    QVERIFY(lines.join('\n').contains("--list-displays"));
+    QVERIFY(lines.join('\n').contains("screencap"));
+    QVERIFY(lines.join('\n').contains("install"));
+    QVERIFY(lines.join('\n').contains("push"));
+    QVERIFY(lines.join('\n').contains("keyevent|KEYCODE_HOME"));
+
+    log.close();
+    engine.preferences.remoteAdb = false;
+    const int beforeLocal = found.size();
+    engine.refresh();
+    QTRY_VERIFY_WITH_TIMEOUT(found.size() > beforeLocal, 3000);
+    QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
+    const auto localLines = QString::fromUtf8(log.readAll()).split('\n');
+    QVERIFY(localLines[localLines.size() - 2].endsWith('\t'));
+    qunsetenv("HUB_ENV_LOG");
+    qunsetenv("ADB_SERVER_SOCKET");
+  }
   void failuresClearState() {
     Engine engine;
     engine.preferences.adb = fakeTool();
@@ -2057,6 +2188,68 @@ private slots:
     QTRY_VERIFY(!engine.wirelessBusy());
     QTRY_VERIFY(
         messages.last()[0].toString().contains("Wireless request failed"));
+  }
+  void connectionRouteWorkspaceValidatesAppliesAndFits() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(2);
+    auto *mode = window.findChild<QComboBox *>("connectionMode");
+    auto *server = window.findChild<QLineEdit *>("adbServerEndpoint");
+    auto *transport = window.findChild<QComboBox *>("tunnelTransport");
+    auto *host = window.findChild<QLineEdit *>("tunnelHost");
+    auto *port = window.findChild<QSpinBox *>("tunnelPort");
+    auto *summary = window.findChild<QLabel *>("connectionRouteSummary");
+    auto *help = window.findChild<QLabel *>("connectionRouteHelp");
+    auto *apply = window.findChild<QPushButton *>("applyConnectionRoute");
+    QVERIFY(mode && server && transport && host && port && summary && help &&
+            apply);
+    QTRY_VERIFY_WITH_TIMEOUT(mode->isEnabled(), 3000);
+    QCOMPARE(mode->currentData().toBool(), false);
+    QVERIFY(summary->text().contains("local ADB"));
+    QVERIFY(!server->isEnabled());
+
+    mode->setCurrentIndex(mode->findData(true));
+    QVERIFY(server->isEnabled());
+    QVERIFY(!apply->isEnabled());
+    QVERIFY(help->text().contains("host:port"));
+    server->setText("adb.example:5037");
+    QVERIFY(apply->isEnabled());
+    QVERIFY(host->isEnabled());
+    QVERIFY(port->isEnabled());
+    transport->setCurrentIndex(transport->findData(true));
+    QVERIFY(host->isEnabled());
+    QVERIFY(port->isEnabled());
+    host->setText("999.0.0.1");
+    QVERIFY(!apply->isEnabled());
+    host->setText("127.0.0.1");
+    port->setValue(27183);
+    QVERIFY(apply->isEnabled());
+    apply->click();
+    QTRY_VERIFY_WITH_TIMEOUT(mode->isEnabled(), 3000);
+    settings.sync();
+    QVERIFY(settings.value("connection/remote-adb").toBool());
+    QCOMPARE(settings.value("connection/adb-server").toString(),
+             QString("adb.example:5037"));
+    QVERIFY(settings.value("connection/force-adb-forward").toBool());
+    QCOMPARE(settings.value("connection/tunnel-host").toString(),
+             QString("127.0.0.1"));
+    QCOMPARE(settings.value("connection/tunnel-port").toInt(), 27183);
+    QVERIFY(summary->text().contains("adb.example:5037"));
+    QVERIFY(help->text().contains("SSH"));
+
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+
+    mode->setCurrentIndex(mode->findData(false));
+    QVERIFY(apply->isEnabled());
+    apply->click();
+    QTRY_VERIFY_WITH_TIMEOUT(mode->isEnabled(), 3000);
+    bundledPreferences().save(settings);
   }
   void scanTimeoutClearsStaleDevices() {
     Engine engine;

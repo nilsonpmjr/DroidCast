@@ -543,6 +543,9 @@ QString textOptionError(const QString &key, const QString &value) {
 }
 
 PreferenceIssue sessionIssue(const Preferences &p, bool recording) {
+  const auto transportIssue = connectionIssue(p);
+  if (!transportIssue.isEmpty())
+    return {"connection", transportIssue};
   for (const auto &option : sessionOptions()) {
     if (!sessionOptionAvailable(option, p))
       continue;
@@ -625,6 +628,13 @@ Preferences Preferences::load(QSettings &s) {
   p.awake = s.value("session/awake", p.awake).toBool();
   p.screenOff = s.value("session/screenOff", p.screenOff).toBool();
   p.top = s.value("session/top", p.top).toBool();
+  p.remoteAdb = s.value("connection/remote-adb", false).toBool();
+  p.adbServerEndpoint =
+      s.value("connection/adb-server").toString().trimmed().left(512);
+  p.forceAdbForward = s.value("connection/force-adb-forward", false).toBool();
+  p.tunnelHost =
+      s.value("connection/tunnel-host").toString().trimmed().left(15);
+  p.tunnelPort = qBound(0, s.value("connection/tunnel-port", 0).toInt(), 65535);
   for (const auto &option : sessionOptions())
     p.options.insert(
         option.key, normalizedOption(option, s.value("options/" + option.key)));
@@ -646,7 +656,7 @@ Preferences Preferences::load(QSettings &s) {
 }
 
 void Preferences::save(QSettings &s) const {
-  s.setValue("metadata/settings-version", 3);
+  s.setValue("metadata/settings-version", 4);
   s.setValue("session/codec", codec);
   s.setValue("session/mouse", mouse);
   s.setValue("captures/directory", mediaDirectory);
@@ -658,6 +668,11 @@ void Preferences::save(QSettings &s) const {
   s.setValue("session/awake", awake);
   s.setValue("session/screenOff", screenOff);
   s.setValue("session/top", top);
+  s.setValue("connection/remote-adb", remoteAdb);
+  s.setValue("connection/adb-server", adbServerEndpoint);
+  s.setValue("connection/force-adb-forward", forceAdbForward);
+  s.setValue("connection/tunnel-host", tunnelHost);
+  s.setValue("connection/tunnel-port", tunnelPort);
   for (const auto &option : sessionOptions())
     s.setValue("options/" + option.key,
                normalizedOption(option, options.value(option.key)));
@@ -946,6 +961,14 @@ QStringList mirrorArguments(const QString &serial, const Preferences &p,
     } else
       args << "--" + option.key + "=" + value.toString();
   }
+  if (p.remoteAdb) {
+    if (p.forceAdbForward)
+      args << "--force-adb-forward";
+    if (!p.tunnelHost.isEmpty())
+      args << "--tunnel-host=" + p.tunnelHost;
+    if (p.tunnelPort > 0)
+      args << "--tunnel-port=" + QString::number(p.tunnelPort);
+  }
   return args;
 }
 
@@ -957,6 +980,38 @@ bool validEndpoint(const QString &endpoint) {
   auto match = pattern.match(endpoint);
   return match.hasMatch() && match.captured(1).toInt() > 0 &&
          match.captured(1).toInt() <= 65535;
+}
+
+bool validIpv4Address(const QString &address) {
+  const auto parts = address.split('.');
+  if (parts.size() != 4)
+    return false;
+  for (const auto &part : parts) {
+    bool ok = false;
+    const int value = part.toInt(&ok);
+    if (!ok || value < 0 || value > 255 || part.isEmpty() ||
+        (part.size() > 1 && part.startsWith('0')))
+      return false;
+  }
+  return true;
+}
+
+QString connectionIssue(const Preferences &p) {
+  if (!p.remoteAdb)
+    return {};
+  if (!validEndpoint(p.adbServerEndpoint))
+    return "Enter the remote ADB server as host:port.";
+  if (!p.tunnelHost.isEmpty() && !validIpv4Address(p.tunnelHost))
+    return "Tunnel host must be an IPv4 address accepted by scrcpy.";
+  if (p.tunnelPort < 0 || p.tunnelPort > 65535)
+    return "Tunnel port must be zero or between 1 and 65535.";
+  return {};
+}
+
+QString adbServerSocket(const Preferences &p) {
+  return p.remoteAdb && validEndpoint(p.adbServerEndpoint)
+             ? "tcp:" + p.adbServerEndpoint
+             : QString{};
 }
 
 QString executablePath(const QString &program) {
@@ -1183,6 +1238,8 @@ Engine::Engine(QObject *parent) : QObject(parent) {
               stopping = false;
               activeSerial.clear();
               activeRecording.clear();
+              activeTransportPinned = false;
+              activeAdbServerSocket.clear();
               emit message("The bundled mirror engine could not start. See "
                            "Diagnostics or reinstall DroidCast Desktop.");
               emit sessionChanged();
@@ -1208,6 +1265,8 @@ Engine::Engine(QObject *parent) : QObject(parent) {
               state = SessionState::Ended;
             activeSerial.clear();
             activeRecording.clear();
+            activeTransportPinned = false;
+            activeAdbServerSocket.clear();
             if (forcedStop)
               emit message("The engine was forced to stop. Any recording may "
                            "be incomplete.");
@@ -1397,9 +1456,35 @@ Engine::~Engine() {
   }
 }
 
+QProcessEnvironment Engine::processEnvironment(bool scrcpy) const {
+  auto env = QProcessEnvironment::systemEnvironment();
+  env.remove("ADB_SERVER_SOCKET");
+  const auto socket = activeTransportPinned ? activeAdbServerSocket
+                                            : adbServerSocket(preferences);
+  if (!socket.isEmpty())
+    env.insert("ADB_SERVER_SOCKET", socket);
+  if (scrcpy) {
+    env.insert("ADB", executablePath(preferences.adb));
+    if (!preferences.server.isEmpty())
+      env.insert("SCRCPY_SERVER_PATH", preferences.server);
+  }
+  return env;
+}
+
+void Engine::prepareAdbProcess(QProcess &process) const {
+  process.setProcessEnvironment(processEnvironment(false));
+}
+
 void Engine::refresh() {
   if (scanning())
     return;
+  const auto issue = connectionIssue(preferences);
+  if (!issue.isEmpty()) {
+    devices.clear();
+    emit devicesChanged();
+    emit message(issue);
+    return;
+  }
   if (executablePath(preferences.adb).isEmpty()) {
     devices.clear();
     emit devicesChanged();
@@ -1410,6 +1495,7 @@ void Engine::refresh() {
   scanOutput.clear();
   scanTimedOut = false;
   scanTimeout.start(10000);
+  prepareAdbProcess(scan);
   scan.start(preferences.adb, {"devices", "-l"});
 }
 
@@ -1425,11 +1511,8 @@ void Engine::inspectDevice(const QString &serial) {
   inspectionAborted = false;
   emit inspectionResult(serial,
                         "Inspecting displays, encoders, cameras and apps…");
-  auto env = QProcessEnvironment::systemEnvironment();
+  auto env = processEnvironment(true);
   env.remove("DROIDCAST_SESSION_TOKEN");
-  env.insert("ADB", executablePath(preferences.adb));
-  if (!preferences.server.isEmpty())
-    env.insert("SCRCPY_SERVER_PATH", preferences.server);
   inspector.setProcessEnvironment(env);
   inspectionTimeout.start(20000);
   inspector.start(preferences.scrcpy,
@@ -1481,10 +1564,9 @@ bool Engine::start(const QString &serial, const QString &recording) {
                  "complete app package.");
     return false;
   }
-  auto env = QProcessEnvironment::systemEnvironment();
-  env.insert("ADB", executablePath(preferences.adb));
-  if (!preferences.server.isEmpty())
-    env.insert("SCRCPY_SERVER_PATH", preferences.server);
+  activeAdbServerSocket = adbServerSocket(preferences);
+  activeTransportPinned = true;
+  auto env = processEnvironment(true);
   activeSerial = serial;
   activeRecording = recording;
   activeAudioOnly = preferences.options.value("audio-only", false).toBool();
@@ -2167,6 +2249,11 @@ void Engine::launchApp(const QString &package) {
 void Engine::connectWireless(const QString &endpoint, const QString &code) {
   if (wirelessBusy())
     return;
+  const auto transportIssue = connectionIssue(preferences);
+  if (!transportIssue.isEmpty()) {
+    emit message(transportIssue);
+    return;
+  }
   if (!validEndpoint(endpoint) ||
       (!code.isEmpty() &&
        !QRegularExpression("\\A[0-9]{6}\\z").match(code).hasMatch())) {
@@ -2179,6 +2266,7 @@ void Engine::connectWireless(const QString &endpoint, const QString &code) {
   pairingInput = code.isEmpty() ? QByteArray{} : code.toUtf8() + '\n';
   wirelessTimeout.start(30000);
   emit message(code.isEmpty() ? "Connecting to phone…" : "Pairing with phone…");
+  prepareAdbProcess(wireless);
   wireless.start(preferences.adb,
                  {code.isEmpty() ? "connect" : "pair", endpoint});
 }
@@ -2186,6 +2274,11 @@ void Engine::connectWireless(const QString &endpoint, const QString &code) {
 bool Engine::canUseDevice(const QString &serial) {
   if (deviceBusy())
     return false;
+  const auto issue = connectionIssue(preferences);
+  if (!issue.isEmpty()) {
+    emit message(issue);
+    return false;
+  }
   for (const auto &d : devices)
     if (d.serial == serial && d.ready())
       return true;
@@ -2216,6 +2309,7 @@ void Engine::capture(const QString &serial, const QString &path) {
   deviceAborted = false;
   deviceTimeout.start(20000);
   emit message("Capturing phone screen…");
+  prepareAdbProcess(deviceTask);
   deviceTask.start(preferences.adb,
                    {"-s", serial, "exec-out", "screencap", "-p"});
 }
@@ -2245,6 +2339,7 @@ void Engine::installApk(const QString &serial, const QString &path) {
   deviceAborted = false;
   deviceTimeout.start(120000);
   emit message("Installing application on your phone…");
+  prepareAdbProcess(deviceTask);
   deviceTask.start(preferences.adb, {"-s", serial, "install", path});
 }
 
@@ -2302,6 +2397,7 @@ void Engine::pushFile(const QString &serial, const QString &path,
   emit filePushMessage("Sending " + source.fileName() + " to " +
                        targetDirectory + "…");
   emit message("Sending file to the Android device…");
+  prepareAdbProcess(deviceTask);
   deviceTask.start(
       preferences.adb,
       {"-s", serial, "push", source.absoluteFilePath(), targetDirectory});
@@ -2377,6 +2473,7 @@ void Engine::phoneAction(const QString &serial, PhoneAction action) {
   deviceTimedOut = false;
   deviceAborted = false;
   deviceTimeout.start(10000);
+  prepareAdbProcess(deviceTask);
   deviceTask.start(preferences.adb,
                    {"-s", serial, "shell", "input", "keyevent", key});
 }

@@ -148,6 +148,7 @@ these broader tickets complete.
     - **Verification:** Compatible USB hardware with ADB authorization absent, plus Windows driver failure and unsupported transport behavior.
 
 23. **Connect through an existing remote ADB endpoint or tunnel**
+    - **Status:** Product path and automated subprocess coverage implemented; real network/platform verification remains.
     - **Blocked by:** 13, category routes.
     - **What it delivers:** Configure a remote ADB socket and tunnel host/port/forward mode, discover a phone through it and start a session.
     - **Acceptance:** Settings apply consistently to discovery, capabilities and all device actions; normal local configuration remains recoverable; no automatic public ADB exposure, shared-server termination or implicit SSH credential management.

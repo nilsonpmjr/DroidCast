@@ -127,7 +127,7 @@ Window::Window(QWidget *parent) : QMainWindow(parent) {
   navigation->setObjectName("navigation");
   navigation->setAccessibleName("Main navigation");
   const QStringList names{"Connected devices", "Active session",
-                          "Wireless pairing",  "Recordings & captures",
+                          "Connection",        "Recordings & captures",
                           "Input & controls",  "Settings",
                           "Diagnostics"};
   const QStringList icons{"phone", "mirror",   "wifi",    "capture",
@@ -141,7 +141,7 @@ Window::Window(QWidget *parent) : QMainWindow(parent) {
   runtimeStatus = label("Checking bundled services…", "muted");
   runtimeLayout->addWidget(runtimeStatus);
   side->addWidget(runtime);
-  side->addWidget(label("Local connection. No account.", "muted"));
+  side->addWidget(label("No account. Settings stay local.", "muted"));
   horizontal->addWidget(sidebar);
   auto *main = new QWidget;
   auto *vertical = new QVBoxLayout(main);
@@ -762,10 +762,148 @@ QWidget *Window::sessionPage() {
 }
 QWidget *Window::wirelessPage() {
   QVBoxLayout *layout;
-  auto *widget = page("Wireless pairing",
-                      "Connect without a cable. Keep your Android phone and "
-                      "computer on the same trusted Wi-Fi network.",
-                      layout);
+  auto *widget =
+      page("Connection & wireless",
+           "Choose where ADB runs, then pair or connect a phone.", layout);
+  auto *routeBox = new QGroupBox("Connection route");
+  routeBox->setObjectName("connectionRoute");
+  auto *routeForm = new QFormLayout(routeBox);
+  routeForm->setSpacing(14);
+  auto *routeSummary = label({}, "badge");
+  routeSummary->setObjectName("connectionRouteSummary");
+  routeSummary->setAccessibleName("Current connection route");
+  routeForm->addRow(routeSummary);
+  auto *mode = new QComboBox;
+  mode->setObjectName("connectionMode");
+  mode->setAccessibleName("ADB server location");
+  mode->addItem("Local · this computer", false);
+  mode->addItem("Remote · existing ADB server or forwarded socket", true);
+  mode->setCurrentIndex(mode->findData(engine.preferences.remoteAdb));
+  field(routeForm, "ADB server", mode);
+  auto *server = new QLineEdit(engine.preferences.adbServerEndpoint);
+  server->setObjectName("adbServerEndpoint");
+  server->setAccessibleName("Remote ADB server address");
+  server->setPlaceholderText("adb-host.example:5037");
+  server->setMaxLength(512);
+  field(routeForm, "Remote server", server);
+  auto *transport = new QComboBox;
+  transport->setObjectName("tunnelTransport");
+  transport->setAccessibleName("scrcpy tunnel transport");
+  transport->addItem("Automatic · reverse preferred", false);
+  transport->addItem("Forced forward · SSH local forwarding", true);
+  transport->setCurrentIndex(
+      transport->findData(engine.preferences.forceAdbForward));
+  field(routeForm, "scrcpy tunnel", transport);
+  auto *tunnelHost = new QLineEdit(engine.preferences.tunnelHost);
+  tunnelHost->setObjectName("tunnelHost");
+  tunnelHost->setAccessibleName("scrcpy tunnel IPv4 address");
+  tunnelHost->setPlaceholderText("127.0.0.1");
+  tunnelHost->setMaxLength(15);
+  field(routeForm, "Tunnel IPv4", tunnelHost);
+  auto *tunnelPort = new QSpinBox;
+  tunnelPort->setObjectName("tunnelPort");
+  tunnelPort->setAccessibleName("scrcpy tunnel TCP port");
+  tunnelPort->setRange(0, 65535);
+  tunnelPort->setSpecialValueText("Use scrcpy default port");
+  tunnelPort->setValue(engine.preferences.tunnelPort);
+  field(routeForm, "Tunnel port", tunnelPort);
+  auto *routeHelp = label({}, "muted");
+  routeHelp->setObjectName("connectionRouteHelp");
+  routeForm->addRow(routeHelp);
+  auto *applyRoute = button("Apply connection route", "refresh");
+  applyRoute->setObjectName("applyConnectionRoute");
+  applyRoute->setProperty("primary", true);
+  routeForm->addRow(applyRoute);
+  layout->addWidget(routeBox);
+
+  auto candidate = [this, mode, server, transport, tunnelHost, tunnelPort] {
+    auto value = engine.preferences;
+    value.remoteAdb = mode->currentData().toBool();
+    value.adbServerEndpoint = server->text().trimmed();
+    value.forceAdbForward = transport->currentData().toBool();
+    value.tunnelHost = tunnelHost->text().trimmed();
+    value.tunnelPort = tunnelPort->value();
+    return value;
+  };
+  auto updateRoute = [this, mode, server, transport, tunnelHost, tunnelPort,
+                      routeSummary, routeHelp, applyRoute, candidate] {
+    const auto value = candidate();
+    const bool remote = value.remoteAdb;
+    const bool busy = engine.running() || engine.scanning() ||
+                      engine.wirelessBusy() || engine.deviceBusy();
+    mode->setEnabled(!busy);
+    server->setEnabled(remote && !busy);
+    transport->setEnabled(remote && !busy);
+    tunnelHost->setEnabled(remote && !busy);
+    tunnelPort->setEnabled(remote && !busy);
+    const auto issue = connectionIssue(value);
+    if (remote) {
+      const auto endpoint = value.adbServerEndpoint.isEmpty()
+                                ? QString("remote ADB server")
+                                : value.adbServerEndpoint;
+      routeSummary->setText("This computer → " + endpoint + " → Android");
+    } else {
+      routeSummary->setText("This computer → local ADB → Android");
+    }
+    if (!issue.isEmpty()) {
+      routeHelp->setText(issue);
+    } else if (remote && value.forceAdbForward) {
+      routeHelp->setText(
+          "Remote ADB is unencrypted unless carried inside SSH. Forced "
+          "forward matches an existing SSH -L data tunnel; DroidCast never "
+          "manages SSH.");
+    } else if (remote) {
+      routeHelp->setText(
+          "Remote ADB is unencrypted. Use SSH outside DroidCast. Set the "
+          "tunnel IPv4 for direct remote ADB; leave it empty for an existing "
+          "SSH tunnel.");
+    } else {
+      routeHelp->setText(
+          "Local mode ignores any inherited ADB_SERVER_SOCKET value.");
+    }
+    const bool dirty =
+        value.remoteAdb != engine.preferences.remoteAdb ||
+        value.adbServerEndpoint != engine.preferences.adbServerEndpoint ||
+        value.forceAdbForward != engine.preferences.forceAdbForward ||
+        value.tunnelHost != engine.preferences.tunnelHost ||
+        value.tunnelPort != engine.preferences.tunnelPort;
+    applyRoute->setEnabled(issue.isEmpty() && dirty && !busy);
+  };
+  for (auto *combo : {mode, transport})
+    connect(combo, &QComboBox::currentIndexChanged, this, updateRoute);
+  for (auto *edit : {server, tunnelHost})
+    connect(edit, &QLineEdit::textChanged, this, updateRoute);
+  connect(tunnelPort, &QSpinBox::valueChanged, this, updateRoute);
+  connect(&engine, &Engine::scanChanged, this, updateRoute);
+  connect(&engine, &Engine::wirelessChanged, this, updateRoute);
+  connect(&engine, &Engine::sessionChanged, this, updateRoute);
+  connect(&engine, &Engine::deviceTaskChanged, this, updateRoute);
+  connect(applyRoute, &QPushButton::clicked, this,
+          [this, candidate, updateRoute] {
+            const auto value = candidate();
+            const auto issue = connectionIssue(value);
+            if (!issue.isEmpty()) {
+              notice->setText(issue);
+              return;
+            }
+            engine.preferences.remoteAdb = value.remoteAdb;
+            engine.preferences.adbServerEndpoint = value.adbServerEndpoint;
+            engine.preferences.forceAdbForward = value.forceAdbForward;
+            engine.preferences.tunnelHost = value.tunnelHost;
+            engine.preferences.tunnelPort = value.tunnelPort;
+            engine.preferences.save(settings);
+            engine.devices.clear();
+            updateDevices();
+            notice->setText(value.remoteAdb
+                                ? "Remote connection route applied. Scanning "
+                                  "that ADB server…"
+                                : "Local connection route restored. Scanning "
+                                  "this computer…");
+            engine.refresh();
+            updateRoute();
+          });
+  updateRoute();
+
   QVBoxLayout *help;
   auto *helpCard = card(help);
   help->addWidget(label("Before you connect", "section"));
@@ -804,11 +942,12 @@ QWidget *Window::wirelessPage() {
   connectForm->addRow(connectButton);
   layout->addWidget(connectBox);
   auto update = [this, pairAddress, address, code, pairButton, connectButton] {
+    const bool routeReady = connectionIssue(engine.preferences).isEmpty();
     pairButton->setEnabled(
-        !engine.wirelessBusy() &&
+        routeReady && !engine.wirelessBusy() &&
         validEndpoint(pairAddress->text().trimmed()) &&
         QRegularExpression("\\A[0-9]{6}\\z").match(code->text()).hasMatch());
-    connectButton->setEnabled(!engine.wirelessBusy() &&
+    connectButton->setEnabled(routeReady && !engine.wirelessBusy() &&
                               validEndpoint(address->text().trimmed()));
   };
   connect(pairAddress, &QLineEdit::textChanged, this, update);

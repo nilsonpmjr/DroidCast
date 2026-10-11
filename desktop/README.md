@@ -93,8 +93,14 @@ Windows/macOS build paths have not yet been exercised.
   Camera sessions reveal contextual torch on/off and relative zoom controls.
   They use scrcpy's Android control channel, so they are unavailable in read-only
   mode and report requests rather than assuming the hardware accepted them.
-- **Wireless pairing:** six-digit pairing code and separate pairing/connection
-  addresses. Codes go through stdin and are never saved.
+- **Connection & wireless:** local ADB is the default, while an existing remote
+  ADB server may be selected as one coherent route for discovery, pairing,
+  connection, inspection, mirroring and every device action. scrcpy tunnel host
+  and port are optional, while automatic mode retains reverse-first behavior and
+  forced-forward mode supports an existing SSH `-L` data tunnel. Raw remote ADB is identified as unencrypted,
+  SSH setup remains external, and returning to local mode explicitly ignores an
+  inherited `ADB_SERVER_SOCKET`. Endpoints persist locally; pairing codes go
+  through stdin and are never saved.
 - **Recordings & captures:** actual local PNG, MKV and MP4 files plus dedicated
   MKA, M4A, OPUS, AAC, FLAC and WAV audio recordings. Video, audio and screenshot
   filters use distinct icons. An active recording cannot be opened until the
@@ -162,7 +168,8 @@ the first media packet, never merely from process startup. See
 ## Verification and visual review
 
 Tests cover device parsing and states, argument boundaries, wireless validation,
-settings persistence, no automatic mirroring, process failures/timeouts, pairing,
+connection-route persistence and propagation, local environment isolation,
+session-pinned remote transport, no automatic mirroring, process failures/timeouts, pairing,
 valid/invalid screenshot handling, APK results, synchronized preference switches,
 input-mode compatibility, recording validation, video-frame and audio-packet
 lifecycle, graceful
@@ -190,8 +197,8 @@ artwork: the iMac variant for desktop hosts and the MacBook variant when a lapto
 can be identified from host power/model information. Unknown form factors safely
 fall back to Desktop. The original TS project remains untouched.
 
-Next: add one coherent Connection/Tunnels route for remote ADB and scrcpy tunnel
-settings; validate display, virtual-display, Android actions, audio recordings,
+Next: complete the Control and Shortcuts routes; validate remote ADB/SSH tunnel,
+display, virtual-display, Android actions, audio recordings,
 clipboard, measured FPS, live app launch and camera sessions with physical devices;
 prototype embedded video before deciding its release scope; add per-device profiles
 and concurrent sessions; then finish standalone platform installers.

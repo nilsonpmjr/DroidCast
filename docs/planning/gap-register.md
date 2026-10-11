@@ -22,7 +22,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Bundled runtime | Partial | The forked client, ADB and matching server are launched without executable pickers. | Clean-machine packages, signing and Windows/macOS verification. |
 | Session lifecycle | Partial | First-video-frame or first-audio-packet state, graceful stop, recording finalization and disconnect/failure states. | Real unplug/reconnect and playable-recording tests on phones. |
 | Device workspace | Partial | USB discovery, wireless pair/connect, screenshots, APK install and selected-device targeting. | Complete pair-to-mirror guidance and broader recovery testing. |
-| Configuration routes | Partial | Searchable Video, Camera, Audio, Device, Window, Keyboard, Mouse, Gamepad, Recording and Virtual display categories. | Connection/Tunnels, Control, OTG, Video4Linux and complete Shortcuts routes. |
+| Configuration routes | Partial | Connection/Tunnels plus searchable Video, Camera, Audio, Device, Window, Keyboard, Mouse, Gamepad, Recording and Virtual display routes. | Control, OTG, Video4Linux and complete Shortcuts routes. |
 | Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, inspected-app launch, one-file transfer, Android/window rotation, reset video, mirror-window actions, rendered-FPS measurement and contextual camera controls. | Decide whether multi-file drag/drop and transfer progress belong in release scope. |
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
 | Audio | Partial | Enablement, all capture sources, Android playback duplication, codec-matched inspected/manual encoder, bitrate, require-audio, host playback/buffers, first-packet-backed audio-only sessions and codec-safe dedicated recording formats. | Physical-device output and playable-file proof. |
@@ -32,30 +32,43 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Recording | Partial | Mode-specific MKV/MP4/MKA/M4A/OPUS/AAC/FLAC/WAV, codec validation, migration, unique paths, filters and graceful finalization state. | Playback verification of real files after normal and abnormal endings. |
 | Embedded video | Open decision | The engine opens a separate native mirror window. | Decide release scope; prototype a real frame inside Qt before promising it. |
 | OTG | Open | Nothing end to end. | USB discovery without ADB, control-only session model, drivers and hardware tests. |
-| Remote tunnels | Open | Ordinary wireless ADB pairing/connection only. | Consistent remote socket/tunnel configuration across every ADB operation. |
+| Remote tunnels | Partial | Local/remote ADB route, forced-forward tunnel options, persistence and one transport snapshot across every ADB/scrcpy child are covered by automated tests. | Real remote ADB and SSH tunnel journeys, unreachable-host recovery review and Windows/macOS proof. |
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
 
-## Next implementation: coherent Connection and Tunnels route
+## Connection and Tunnels checkpoint
 
-Wireless pairing/connection exists, but advanced remote ADB and scrcpy tunnel settings
-do not. They must share one transport policy rather than partially routing operations.
+The product path and automated boundary proof now exist:
 
-1. Add a Connection route for local versus remote ADB server, with a validated TCP
-   `ADB_SERVER_SOCKET` host/port and an explicit warning that raw remote ADB is
-   unencrypted. SSH setup remains user-managed; DroidCast must not compose a shell.
-2. Apply the selected ADB server environment consistently to discovery, pairing,
-   connect, inspection, screenshots, APK install, file transfer, phone actions and
-   the scrcpy child. Never let the device list and session target different servers.
-3. Add validated scrcpy tunnel host/port plus automatic/reverse/forced-forward policy.
-   Explain when an SSH `-L`/`-R` topology needs each mode and retain upstream defaults
-   when fields are empty.
-4. Persist endpoints and policy, but no pairing code, SSH credential or secret. Make
-   local mode a one-action recovery path from an unreachable remote server.
-5. Test direct argument/environment boundaries, IPv4/hostname/bracketed IPv6 parsing,
-   malformed ports, every subprocess route, timeout recovery and 920×680 layout.
-6. Verify local ADB, a remote ADB server and both SSH tunnel topologies on at least two
-   desktop platforms before calling the route complete.
+1. Local versus remote ADB is explicit. Remote `host:port` becomes
+   `ADB_SERVER_SOCKET=tcp:host:port`; local mode removes any inherited socket.
+2. Discovery, pairing/connect, capability inspection, screenshot, installation, file
+   transfer, phone actions and scrcpy all receive the same environment. A running
+   session pins its route even if next-session preferences change.
+3. Validated `--tunnel-host`/`--tunnel-port` values work with either transport.
+   Automatic/reverse-first behavior remains scrcpy's default; forced-forward mode
+   adds `--force-adb-forward` for an existing SSH `-L` data tunnel.
+4. Endpoints and policy persist, but pairing codes, SSH credentials and secrets do not.
+   The app warns that raw remote ADB is unencrypted and never constructs SSH commands.
+5. Automated tests cover validation, arguments, every child-process family, inherited-
+   environment isolation, route switching and the 920×680 layout.
+
+Before promoting this row from Partial to Implemented, run a real local journey, a
+controlled remote ADB journey and the applicable SSH forwarding topologies on at least
+two desktop platforms. Record behavior for unreachable servers and switching back to
+local after timeout; the current fake-process proof cannot validate network topology.
+
+## Next implementation: Control and Shortcuts routes
+
+1. Group read-only, clipboard synchronization, legacy paste and scrcpy drag/drop
+   destination under a plain-language Control route. Keep explicit DroidCast file
+   transfer separate from scrcpy window drag/drop so their behavior is not conflated.
+2. Add the configurable shortcut modifier and a complete searchable action reference,
+   including platform-specific Super/Alt naming and conflicts.
+3. Reconcile every mutating toolbar path with read-only mode and document which actions
+   are host-only, Android control-channel operations or ADB subprocesses.
+4. Add dependency, argument, persistence, accessibility and 920×680 tests, then verify
+   Unicode clipboard/paste and drag/drop behavior on real Linux, Windows and macOS.
 
 ## Release-proof still required for recent work
 
@@ -90,6 +103,9 @@ do not. They must share one transport policy rather than partially routing opera
   backed state and mode boundaries, not audible output or a playable file.
 - **Cross-platform bridge:** exercise stdin commands and shutdown on Windows; validate
   the app bundle and pipe behavior on macOS.
+- **Remote connection:** use a controlled remote ADB server and real SSH forwarding;
+  verify discovery-to-session consistency, unreachable-server recovery and return to
+  local mode on Linux plus at least one other desktop platform.
 - **Host branding:** confirm Desktop/Laptop selection on Windows hardware and both
   iMac/MacBook macOS hosts. Linux laptop selection and fallback were reviewed locally.
 - **Build toolchain:** GCC 16.2 crashes internally at `-O2`/`-O3`; Release C++

@@ -49,6 +49,15 @@ int main(int argc, char **argv) {
   const auto args = app.arguments();
   QTextStream out(stdout);
   const auto mode = qEnvironmentVariable("HUB_TEST_MODE");
+  const auto environmentLog = qEnvironmentVariable("HUB_ENV_LOG");
+  if (!environmentLog.isEmpty()) {
+    QFile log(environmentLog);
+    if (log.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+      QTextStream stream(&log);
+      stream << args.mid(1).join('|') << '\t'
+             << qEnvironmentVariable("ADB_SERVER_SOCKET") << '\n';
+    }
+  }
   if (mode == "hang")
     return app.exec();
   if (args.contains("--list-displays")) {

@@ -431,3 +431,26 @@ device compatibility testing remain open.
   video-mode isolation, versioned migration, persistence, widget dependencies,
   extension filtering and the 920×680 layout contract. Real file playback remains
   release-proof work.
+
+## Part 22: coherent Connection and Tunnels route
+
+- Replaced the wireless-only workspace with a Connection & wireless route that makes
+  local versus existing remote ADB explicit. The topology summary, inline validation,
+  raw-ADB security warning and Apply action keep incomplete edits from silently
+  changing discovery. Returning to local is a single action.
+- Added persisted remote ADB endpoint and scrcpy tunnel policy. Remote endpoints are
+  passed as `ADB_SERVER_SOCKET=tcp:host:port`; local mode removes an inherited socket.
+  Validated IPv4 host and TCP port arguments work with either transport; automatic
+  mode retains scrcpy's default reverse-first behavior and forced-forward adds the
+  policy flag used with an existing SSH `-L` data tunnel.
+- Centralized child environments across scan, wireless pairing/connect, capability
+  inspection, screenshots, APK install, file transfer, phone actions and the mirror.
+  The active session snapshots its route so editing next-session preferences cannot
+  split live ADB actions from the device scrcpy already opened.
+- Kept security and ownership boundaries narrow: DroidCast does not expose an ADB
+  server, create SSH commands, store SSH material or kill a potentially shared server.
+  Pairing codes remain stdin-only and unsaved.
+- Added validation, persistence, argument, inherited-environment, all-process-family,
+  active-session snapshot and 920×680 UI tests. Automated helpers prove orchestration,
+  not a real remote daemon or SSH topology; those platform journeys remain in the gap
+  register.
