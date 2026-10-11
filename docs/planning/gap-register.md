@@ -22,11 +22,11 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Bundled runtime | Partial | The forked client, ADB and matching server are launched without executable pickers. | Clean-machine packages, signing and Windows/macOS verification. |
 | Session lifecycle | Partial | First-video-frame or first-audio-packet state, graceful stop, recording finalization and disconnect/failure states. | Real unplug/reconnect and playable-recording tests on phones. |
 | Device workspace | Partial | USB discovery, wireless pair/connect, screenshots, APK install and selected-device targeting. | Complete pair-to-mirror guidance and broader recovery testing. |
-| Configuration routes | Partial | Connection/Tunnels plus searchable Video, Camera, Audio, Device, Window, Keyboard, Mouse, Gamepad, Recording and Virtual display routes. | Control, OTG, Video4Linux and complete Shortcuts routes. |
+| Configuration routes | Partial | Connection/Tunnels plus searchable Video, Camera, Audio, Control, Device, Window, Keyboard, Mouse, Gamepad, Shortcuts, Recording and Virtual display routes. | OTG and Video4Linux routes, plus remaining advanced option coverage. |
 | Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, inspected-app launch, one-file transfer, Android/window rotation, reset video, mirror-window actions, rendered-FPS measurement and contextual camera controls. | Decide whether multi-file drag/drop and transfer progress belong in release scope. |
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
 | Audio | Partial | Enablement, all capture sources, Android playback duplication, codec-matched inspected/manual encoder, bitrate, require-audio, host playback/buffers, first-packet-backed audio-only sessions and codec-safe dedicated recording formats. | Physical-device output and playable-file proof. |
-| Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior and UHID gamepad. | Mouse bindings, shortcut modifier, AOA modes, gesture help and peripheral tests. |
+| Input | Partial | SDK/UHID/disabled keyboard/mouse, key behavior, UHID gamepad, validated shortcut modifier, complete shortcut/gesture reference, clipboard policies and mirror-drop target. | Mouse bindings, AOA modes and real peripheral/clipboard/drop tests. |
 | Virtual display | Partial | Creation, size/DPI, flex, searchable inspected-app picker, manual package fallback, IME, decorations and close policy. | Android 10+ hardware journeys. |
 | Camera | Partial | Source, ID/facing, guided declared size/FPS/high-speed choices, manual fallback, startup torch/zoom and live torch/zoom. | Android-version/capability gates and real camera tests. |
 | Recording | Partial | Mode-specific MKV/MP4/MKA/M4A/OPUS/AAC/FLAC/WAV, codec validation, migration, unique paths, filters and graceful finalization state. | Playback verification of real files after normal and abnormal endings. |
@@ -58,17 +58,28 @@ controlled remote ADB journey and the applicable SSH forwarding topologies on at
 two desktop platforms. Record behavior for unreachable servers and switching back to
 local after timeout; the current fake-process proof cannot validate network topology.
 
-## Next implementation: Control and Shortcuts routes
+## Control and Shortcuts checkpoint
 
-1. Group read-only, clipboard synchronization, legacy paste and scrcpy drag/drop
-   destination under a plain-language Control route. Keep explicit DroidCast file
-   transfer separate from scrcpy window drag/drop so their behavior is not conflated.
-2. Add the configurable shortcut modifier and a complete searchable action reference,
-   including platform-specific Super/Alt naming and conflicts.
-3. Reconcile every mutating toolbar path with read-only mode and document which actions
-   are host-only, Android control-channel operations or ADB subprocesses.
-4. Add dependency, argument, persistence, accessibility and 920×680 tests, then verify
-   Unicode clipboard/paste and drag/drop behavior on real Linux, Windows and macOS.
+The searchable Control route now groups read-only, clipboard synchronization,
+compatibility paste and a validated mirror-window drop destination. Explicit
+DroidCast transfer remains separate and labelled. Shortcuts has a validated modifier,
+a direct route from Input & controls and the complete fork action/gesture reference.
+Argument, persistence, inline-validation, accessibility and 920×680 tests exist.
+
+Manual proof still required: Unicode clipboard and legacy paste on representative
+Android versions; APK/non-APK drag/drop into the native mirror; modifier conflicts and
+Windows/macOS Super-key naming. The toolbar classification remains documented in the
+feature map and its mutating paths remain covered by existing read-only tests.
+
+## Next implementation: advanced mouse and AOA input
+
+1. Add validated primary/Shift mouse binding sequences with a visual four-button map.
+2. Expose AOA keyboard, mouse and gamepad only for compatible USB sessions; do not
+   present it as working over wireless ADB.
+3. Explain SDK capture, UHID cursor behavior, secondary-click forwarding and recovery
+   when a phone or desktop driver rejects a physical input mode.
+4. Add argument/dependency/layout coverage, then verify real mice, keyboards and
+   controllers over USB on Linux and Windows before starting the separate OTG mode.
 
 ## Release-proof still required for recent work
 
@@ -82,7 +93,11 @@ local after timeout; the current fake-process proof cannot validate network topo
   Queue acknowledgement does not prove that Android honored the request.
 - **Clipboard:** verify copy and paste with empty, Unicode and maximum practical
   content on Android/Linux, Windows and macOS. Automated tests prove command/privacy
-  behavior, not platform clipboard interoperability.
+  behavior and policy arguments, not platform clipboard interoperability. Also verify
+  compatibility paste with non-ASCII text and automatic synchronization disabled.
+- **Shortcuts and mirror drop:** verify custom modifiers and Super-key conflicts on
+  each desktop platform; drop APK/non-APK files on the native mirror and confirm the
+  configured Android destination. Automated tests only prove arguments and UI routes.
 - **Rendered FPS:** compare structured samples with scrcpy's ordinary FPS log on
   display, read-only and camera sessions; verify skipped-frame reporting under load
   and clean stop/disconnect behavior on all desktop platforms.

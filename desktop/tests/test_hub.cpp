@@ -1504,6 +1504,49 @@ private slots:
     QCOMPARE(restored.keyboard, QString("disabled"));
     QCOMPARE(restored.mouse, QString("disabled"));
   }
+  void controlAndShortcutOptionsStaySafeAndSeparate() {
+    Preferences prefs;
+    prefs.options = {{"no-clipboard-autosync", true},
+                     {"legacy-paste", true},
+                     {"push-target", "/sdcard/Meus Arquivos/"},
+                     {"shortcut-mod", "rctrl,lsuper"}};
+    auto args = mirrorArguments("PHONE123", prefs);
+    QVERIFY(args.contains("--no-clipboard-autosync"));
+    QVERIFY(args.contains("--legacy-paste"));
+    QVERIFY(args.contains("--push-target=/sdcard/Meus Arquivos/"));
+    QVERIFY(args.contains("--shortcut-mod=rctrl,lsuper"));
+    QVERIFY(sessionIssue(prefs).message.isEmpty());
+
+    for (const auto &target :
+         {QString("relative"), QString("/"), QString("/sdcard/../data"),
+          QString("/sdcard/Down\nload")}) {
+      prefs.options["push-target"] = target;
+      QCOMPARE(sessionIssue(prefs).key, QString("push-target"));
+      QVERIFY(!mirrorArguments("PHONE123", prefs)
+                   .join(' ')
+                   .contains("--push-target="));
+    }
+    prefs.options["push-target"] = "/sdcard/Download/";
+    for (const auto &modifier : {QString("ctrl"), QString("lalt,lalt"),
+                                 QString("lalt,"), QString("LALT")}) {
+      prefs.options["shortcut-mod"] = modifier;
+      QCOMPARE(sessionIssue(prefs).key, QString("shortcut-mod"));
+      QVERIFY(!mirrorArguments("PHONE123", prefs)
+                   .join(' ')
+                   .contains("--shortcut-mod="));
+    }
+
+    prefs.options["shortcut-mod"] = "lctrl,rsuper";
+    QSettings settings(storage.filePath("control-shortcuts.ini"),
+                       QSettings::IniFormat);
+    prefs.save(settings);
+    const auto restored = Preferences::load(settings);
+    QCOMPARE(restored.options.value("push-target").toString(),
+             QString("/sdcard/Download/"));
+    QCOMPARE(restored.options.value("shortcut-mod").toString(),
+             QString("lctrl,rsuper"));
+    QVERIFY(restored.options.value("legacy-paste").toBool());
+  }
   void recordingOptionsOnlyApplyToRecordings() {
     Preferences prefs;
     prefs.options = {{"record-format", "mp4"},
@@ -1619,6 +1662,73 @@ private slots:
     QVERIFY(!window.findChild<QComboBox *>("option-gamepad")->isEnabled());
     readOnly->setChecked(false);
     QVERIFY(window.findChild<QComboBox *>("option-gamepad")->isEnabled());
+  }
+  void controlAndShortcutRoutesAreCompleteValidatedAndFit() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(5);
+    auto *category = window.findChild<QComboBox *>("settingsCategory");
+    auto *readOnly = window.findChild<QCheckBox *>("option-no-control");
+    auto *clipboard =
+        window.findChild<QCheckBox *>("option-no-clipboard-autosync");
+    auto *legacy = window.findChild<QCheckBox *>("option-legacy-paste");
+    auto *target = window.findChild<QLineEdit *>("option-push-target");
+    auto *modifier = window.findChild<QLineEdit *>("option-shortcut-mod");
+    QVERIFY(category && readOnly && clipboard && legacy && target && modifier);
+    QVERIFY(category->findText("Control") >= 0);
+    QVERIFY(category->findText("Shortcuts") >= 0);
+
+    category->setCurrentText("Control");
+    QVERIFY(readOnly->isVisible());
+    QVERIFY(clipboard->isVisible());
+    QVERIFY(legacy->isVisible());
+    QVERIFY(target->isVisible());
+    target->setText("../unsafe");
+    QMetaObject::invokeMethod(target, "editingFinished", Qt::DirectConnection);
+    QVERIFY(!window.findChild<QLabel *>("error-push-target")->isHidden());
+    target->setText("/sdcard/Movies/");
+    QMetaObject::invokeMethod(target, "editingFinished", Qt::DirectConnection);
+    QVERIFY(window.findChild<QLabel *>("error-push-target")->isHidden());
+
+    category->setCurrentText("Shortcuts");
+    QVERIFY(modifier->isVisible());
+    modifier->setText("lalt,lalt");
+    QMetaObject::invokeMethod(modifier, "editingFinished",
+                              Qt::DirectConnection);
+    QVERIFY(!window.findChild<QLabel *>("error-shortcut-mod")->isHidden());
+    modifier->setText("rctrl,lsuper");
+    QMetaObject::invokeMethod(modifier, "editingFinished",
+                              Qt::DirectConnection);
+    QVERIFY(window.findChild<QLabel *>("error-shortcut-mod")->isHidden());
+    settings.sync();
+    QCOMPARE(settings.value("options/push-target").toString(),
+             QString("/sdcard/Movies/"));
+    QCOMPARE(settings.value("options/shortcut-mod").toString(),
+             QString("rctrl,lsuper"));
+
+    window.showPage(4);
+    auto *reference = window.findChild<QWidget *>("shortcutReference");
+    auto *shortcutSettings =
+        window.findChild<QPushButton *>("shortcutSettings");
+    QVERIFY(reference && reference->isVisible() && shortcutSettings);
+    QStringList referenceText;
+    for (auto *entry : reference->findChildren<QLabel *>())
+      referenceText.append(entry->text());
+    QVERIFY(referenceText.contains("Reset video capture"));
+    QVERIFY(referenceText.contains("Horizontal tilt gesture"));
+    QVERIFY(referenceText.contains("Camera torch on / off"));
+    shortcutSettings->click();
+    QCOMPARE(window.findChild<QComboBox *>("settingsCategory")->currentText(),
+             QString("Shortcuts"));
+    window.showPage(4);
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
+    bundledPreferences().save(settings);
   }
   void lifecycleUsesFramesAndFinalizesRecording() {
     Engine engine;

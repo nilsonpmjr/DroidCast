@@ -7,6 +7,7 @@
 #include <QProcessEnvironment>
 #include <QRegularExpression>
 #include <QSaveFile>
+#include <QSet>
 #include <QStandardPaths>
 #include <QUuid>
 
@@ -319,7 +320,7 @@ const QList<SessionOption> &sessionOptions() {
        1,
        1000},
       {"no-control",
-       "Device",
+       "Control",
        "Read-only session",
        "Disable Android input and APK installation. Screenshots remain "
        "available.",
@@ -340,10 +341,32 @@ const QList<SessionOption> &sessionOptions() {
        false,
        {}},
       {"no-clipboard-autosync",
-       "Device",
+       "Control",
        "Disable clipboard synchronization",
        "Prevent automatic clipboard sharing with the phone.",
        false,
+       {}},
+      {"legacy-paste",
+       "Control",
+       "Compatibility paste mode",
+       "Inject clipboard text as key events on phones that reject normal "
+       "clipboard paste. Non-ASCII text may not survive this fallback.",
+       false,
+       {}},
+      {"push-target",
+       "Control",
+       "Mirror-window drop destination",
+       "Absolute Android directory used when a non-APK file is dropped on "
+       "the mirror window. This is separate from DroidCast's explicit file "
+       "transfer card.",
+       QString("/sdcard/Download/"),
+       {}},
+      {"shortcut-mod",
+       "Shortcuts",
+       "Shortcut modifier",
+       "One or more comma-separated keys: lctrl, rctrl, lalt, ralt, lsuper "
+       "or rsuper. Super is the Windows or Command key.",
+       QString("lalt,lsuper"),
        {}},
       {"fullscreen",
        "Window",
@@ -536,9 +559,31 @@ QString textOptionError(const QString &key, const QString &value) {
   } else if ((key == "video-encoder" || key == "audio-encoder") &&
              !QRegularExpression("\\A[A-Za-z0-9_.-]{1,256}\\z")
                   .match(value)
-                  .hasMatch())
+                  .hasMatch()) {
     return "Use an encoder name from the phone report (letters, numbers, "
            "dots, underscores or hyphens), or leave empty.";
+  } else if (key == "push-target") {
+    const auto parts = value.split('/', Qt::KeepEmptyParts);
+    if (value.isEmpty() || value.size() > 256 || !value.startsWith('/') ||
+        QDir::cleanPath(value) == "/" || parts.contains(".") ||
+        parts.contains("..") ||
+        QRegularExpression("[\\x00-\\x1f\\x7f]").match(value).hasMatch())
+      return "Use an absolute Android directory other than /, without . or "
+             ".. components.";
+  } else if (key == "shortcut-mod") {
+    const auto keys = value.split(',', Qt::KeepEmptyParts);
+    const QSet<QString> allowed{"lctrl", "rctrl",  "lalt",
+                                "ralt",  "lsuper", "rsuper"};
+    QSet<QString> unique;
+    for (const auto &modifier : keys)
+      if (!allowed.contains(modifier) || unique.contains(modifier))
+        return "Use unique comma-separated modifiers: lctrl, rctrl, lalt, "
+               "ralt, lsuper or rsuper.";
+      else
+        unique.insert(modifier);
+    if (keys.isEmpty() || keys.size() > allowed.size())
+      return "Choose at least one supported shortcut modifier.";
+  }
   return {};
 }
 

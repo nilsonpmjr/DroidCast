@@ -454,3 +454,22 @@ device compatibility testing remain open.
   active-session snapshot and 920×680 UI tests. Automated helpers prove orchestration,
   not a real remote daemon or SSH topology; those platform journeys remain in the gap
   register.
+
+## Part 23: Control and complete Shortcuts routes
+
+- Moved read-only and clipboard synchronization out of the generic Device category
+  into a searchable Control route. Added compatibility paste and a separately labelled
+  mirror-window drag/drop destination without conflating it with DroidCast's explicit,
+  progress-aware file transfer card.
+- Validated Android drop destinations as absolute directories without root, control
+  characters or `.`/`..` traversal components. Values are passed as a single argument;
+  user input is never interpreted by a shell.
+- Added a searchable Shortcuts route with a validated, unique list of supported left/
+  right Ctrl, Alt and Super modifiers. The Input & controls workspace links directly
+  to it and now shows the complete fork shortcut and gesture reference using `MOD`.
+- Clarified that shortcuts require focus in the native mirror window, Ctrl combinations
+  ordinarily reach Android, Super means Windows/Command, and toolbar actions remain
+  available for users who do not memorize shortcuts.
+- Added argument, invalid-input exclusion, persistence, inline validation, direct-route,
+  reference completeness and 920×680 layout tests. Real clipboard, drag/drop, modifier
+  conflict and cross-platform key-name proof remains in the gap register.

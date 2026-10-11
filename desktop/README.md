@@ -106,10 +106,12 @@ Windows/macOS build paths have not yet been exercised.
   filters use distinct icons. An active recording cannot be opened until the
   session ends.
 - **Input & controls:** SDK/UHID/disabled keyboard and mouse choices, accurate
-  shortcut reference using scrcpy's default left Alt / left Super modifier, and
-  a route to advanced input settings including UHID gamepad forwarding.
-- **Settings:** searchable categories for video, camera, audio, device, window,
-  keyboard, mouse, gamepad, recording and virtual displays. Includes read-only
+  complete shortcut reference, a validated configurable modifier, clipboard
+  synchronization and compatibility-paste policies, a safe mirror-window drop
+  destination, and routes to advanced Control, keyboard, mouse and gamepad
+  settings. The default shortcut modifier remains left Alt / left Super.
+- **Settings:** searchable categories for video, camera, audio, control, device,
+  window, keyboard, mouse, gamepad, shortcuts, recording and virtual displays. Includes read-only
   mode, buffering, orientation,
   SDK input preferences, mode-specific recording containers, recording rotation
   and session time limit. Settings apply to the next session and persist locally. Options that do

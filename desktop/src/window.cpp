@@ -1054,30 +1054,73 @@ QWidget *Window::inputPage() {
     layout->addWidget(box);
   }
   auto *advancedInput =
-      button("Advanced keyboard, mouse and gamepad settings", "settings");
+      button("Keyboard, mouse && gamepad settings", "settings");
+  advancedInput->setObjectName("advancedInputSettings");
+  auto *shortcutSettings = button("Shortcut settings", "input");
+  shortcutSettings->setObjectName("shortcutSettings");
+  auto *inputRoutes = new QHBoxLayout;
+  inputRoutes->addWidget(advancedInput);
+  inputRoutes->addWidget(shortcutSettings);
   connect(advancedInput, &QPushButton::clicked, this, [this] {
     findChild<QLineEdit *>("settingsSearch")->clear();
     findChild<QComboBox *>("settingsCategory")->setCurrentText("Keyboard");
     showPage(5);
   });
-  layout->addWidget(advancedInput);
+  connect(shortcutSettings, &QPushButton::clicked, this, [this] {
+    findChild<QLineEdit *>("settingsSearch")->clear();
+    findChild<QComboBox *>("settingsCategory")->setCurrentText("Shortcuts");
+    showPage(5);
+  });
+  layout->addLayout(inputRoutes);
   QVBoxLayout *keys;
   auto *keysCard = card(keys);
+  keysCard->setObjectName("shortcutReference");
   keys->addWidget(label("Keyboard shortcuts", "section"));
   keys->addWidget(label(
-      "In the mirror window, hold left Alt or left Super (Windows / Command) "
-      "with the keys below. Ctrl combinations are sent to your Android app.",
+      "These work while the mirror window has focus. MOD is configured in "
+      "Settings → Shortcuts (left Alt or left Super by default). Ordinary "
+      "Ctrl combinations are sent to the active Android app.",
       "muted"));
   auto *form = new QFormLayout;
   form->setSpacing(12);
   for (auto pair :
-       {qMakePair("Fullscreen", "F / F11"),
-        qMakePair("Android Home / Back", "H / B"),
-        qMakePair("Recent apps", "S"),
-        qMakePair("Turn phone screen off / on", "O / Shift + O"),
-        qMakePair("Notifications", "N"), qMakePair("Paste clipboard", "V")})
+       {qMakePair("Quit mirror", "MOD + Q"),
+        qMakePair("Fullscreen", "MOD + F / F11"),
+        qMakePair("Rotate mirror left / right", "MOD + ← / →"),
+        qMakePair("Flip mirror horizontally", "MOD + Shift + ← / →"),
+        qMakePair("Flip mirror vertically", "MOD + Shift + ↑ / ↓"),
+        qMakePair("Pause / resume image", "MOD + Z / Shift + Z"),
+        qMakePair("Reset video capture", "MOD + Shift + R"),
+        qMakePair("Pixel-perfect / fit window", "MOD + G / W"),
+        qMakePair("Android Home / Back", "MOD + H / B"),
+        qMakePair("Recent apps / Menu", "MOD + S / M"),
+        qMakePair("SDK mouse Home / Back", "Middle / right click"),
+        qMakePair("SDK mouse Recents / notifications", "4th / 5th click"),
+        qMakePair("Volume up / down", "MOD + ↑ / ↓"),
+        qMakePair("Power key", "MOD + P"),
+        qMakePair("Power on with SDK mouse", "Right-click while screen off"),
+        qMakePair("Phone screen off / on", "MOD + O / Shift + O"),
+        qMakePair("Rotate Android screen", "MOD + R"),
+        qMakePair("Notifications / Quick Settings", "MOD + N / N twice"),
+        qMakePair("Collapse Android panels", "MOD + Shift + N"),
+        qMakePair("Copy / cut / paste", "MOD + C / X / V"),
+        qMakePair("Inject clipboard text", "MOD + Shift + V"),
+        qMakePair("Open Android keyboard settings", "MOD + K"),
+        qMakePair("Toggle engine FPS log", "MOD + I"),
+        qMakePair("Pinch or rotate gesture", "Ctrl + drag"),
+        qMakePair("Vertical tilt gesture", "Shift + drag"),
+        qMakePair("Horizontal tilt gesture", "Ctrl + Shift + drag"),
+        qMakePair("Install APK / push file", "Drag file onto mirror"),
+        qMakePair("Camera torch on / off", "MOD + T / Shift + T"),
+        qMakePair("Camera zoom in / out", "MOD + ↑ / ↓")})
     form->addRow(label(pair.first), label(pair.second, "badge"));
   keys->addLayout(form);
+  keys->addWidget(label(
+      "Mouse shortcuts depend on the selected SDK/UHID mode. Dropping an APK "
+      "installs it; dropping another file uses the configured Control "
+      "destination. The session toolbar remains available without memorizing "
+      "shortcuts.",
+      "muted"));
   layout->addWidget(keysCard);
   layout->addStretch();
   return widget;
@@ -1097,8 +1140,9 @@ QWidget *Window::settingsPage() {
   categoryPicker->setObjectName("settingsCategory");
   categoryPicker->setAccessibleName("Configuration category");
   categoryPicker->addItems({"All settings", "Video", "Camera", "Audio",
-                            "Device", "Window", "Keyboard", "Mouse", "Gamepad",
-                            "Recording", "Virtual display"});
+                            "Control", "Device", "Window", "Keyboard", "Mouse",
+                            "Gamepad", "Shortcuts", "Recording",
+                            "Virtual display"});
   layout->addWidget(categoryPicker);
   auto *routes = new QHBoxLayout;
   auto *connectionRoute = button("Connection settings", "wifi");
@@ -1197,8 +1241,9 @@ QWidget *Window::settingsPage() {
                         "audio device behavior awake screen top");
   for (const auto &category :
        {QString("Video"), QString("Camera"), QString("Audio"),
-        QString("Device"), QString("Window"), QString("Keyboard"),
-        QString("Mouse"), QString("Gamepad"), QString("Recording"),
+        QString("Control"), QString("Device"), QString("Window"),
+        QString("Keyboard"), QString("Mouse"), QString("Gamepad"),
+        QString("Shortcuts"), QString("Recording"),
         QString("Virtual display")}) {
     auto *group = new QGroupBox(category + " · advanced");
     auto *fields = new QFormLayout(group);
