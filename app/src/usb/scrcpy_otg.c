@@ -9,6 +9,7 @@
 # include "adb/adb.h"
 #endif
 #include "events.h"
+#include "desktop_bridge.h"
 #include "screen.h"
 #include "sdl_hints.h"
 #include "usb/aoa_hid.h"
@@ -44,10 +45,12 @@ event_loop(struct scrcpy_otg *s) {
         switch (event.type) {
             case SC_EVENT_DEVICE_DISCONNECTED:
                 LOGW("Device disconnected");
+                sc_desktop_bridge_report("disconnected");
                 sc_screen_handle_event(&s->screen, &event);
                 return SCRCPY_EXIT_DISCONNECTED;
             case SC_EVENT_AOA_OPEN_ERROR:
                 LOGE("AOA open error");
+                sc_desktop_bridge_report("failed");
                 return SCRCPY_EXIT_FAILURE;
             case SDL_EVENT_QUIT:
                 LOGD("User requested to quit");
@@ -94,6 +97,7 @@ scrcpy_otg(struct scrcpy_options *options) {
     }
 
     atexit(SDL_Quit);
+    sc_desktop_bridge_start();
 
     enum scrcpy_exit_code ret = SCRCPY_EXIT_FAILURE;
 
@@ -126,6 +130,7 @@ scrcpy_otg(struct scrcpy_options *options) {
     };
     bool ok = sc_usb_init(&s->usb);
     if (!ok) {
+        sc_desktop_bridge_stop();
         return SCRCPY_EXIT_FAILURE;
     }
 
@@ -234,6 +239,11 @@ scrcpy_otg(struct scrcpy_options *options) {
     }
     screen_initialized = true;
 
+    // Process startup alone is not proof that OTG control is usable. At this
+    // point libusb selected and opened the device, AOA is running and the
+    // input-capture window exists.
+    sc_desktop_bridge_report("otg-ready");
+
     // usb_device not needed anymore
     sc_usb_device_destroy(&usb_device);
     usb_device_initialized = false;
@@ -242,6 +252,7 @@ scrcpy_otg(struct scrcpy_options *options) {
     disconnected = ret == SCRCPY_EXIT_DISCONNECTED;
 
 end:
+    sc_desktop_bridge_stop();
     if (aoa_started) {
         sc_aoa_stop(&s->aoa);
     }

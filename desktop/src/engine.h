@@ -58,6 +58,8 @@ struct Preferences {
   bool remoteAdb = false, forceAdbForward = false;
   QString adbServerEndpoint, tunnelHost;
   int tunnelPort = 0;
+  QString otgSerial;
+  bool otgKeyboard = true, otgMouse = true, otgGamepad = false;
   QVariantMap options;
   static Preferences load(QSettings &settings);
   void save(QSettings &settings) const;
@@ -109,9 +111,10 @@ public:
   }
   bool cameraSession() const { return running() && activeCamera; }
   bool audioOnlySession() const { return running() && activeAudioOnly; }
+  bool otgSession() const { return running() && activeOtg; }
   bool captureAllowed(const QString &serial) const {
     return (!usesAlternateDisplay() && !cameraSession() &&
-            !audioOnlySession()) ||
+            !audioOnlySession() && !otgSession()) ||
            serial != activeSerial;
   }
   enum class WindowAction {
@@ -167,6 +170,8 @@ public:
   void inspectDevice(const QString &serial);
   void cancelInspection();
   bool start(const QString &serial, const QString &recording = {});
+  bool startOtg(const QString &serial, bool keyboard, bool mouse,
+                bool gamepad);
   void stop();
   void connectWireless(const QString &endpoint, const QString &code = {});
 signals:
@@ -202,13 +207,13 @@ private:
   QString inspectionSerial;
   bool inspectionAborted = false;
   QTimer scanTimeout, wirelessTimeout, stopTimeout, deviceTimeout,
-      audioCapabilityTimeout;
+      audioCapabilityTimeout, otgCapabilityTimeout;
   QByteArray deviceOutput;
   QString capturePath;
   QString pushDestination;
   bool commandTask = false, filePushTask = false, activeReadOnly = false;
   bool activeAlternateDisplay = false, activeFlexibleDisplay = false,
-       activeCamera = false, activeAudioOnly = false,
+       activeCamera = false, activeAudioOnly = false, activeOtg = false,
        activeAudioPlayback = true;
   bool deviceTimedOut = false, deviceAborted = false;
   bool canUseDevice(const QString &serial);
@@ -218,7 +223,7 @@ private:
   SessionState state = SessionState::Idle;
   bool forcedStop = false, bridgeReady = false, recordingFinalized = false,
        recordingFailed = false, audioLifecycleReady = false,
-       audioLifecycleFailure = false;
+       audioLifecycleFailure = false, otgLifecycleFailure = false;
   QByteArray sessionToken, mirrorOutput;
   QString activeAdbServerSocket;
   bool activeTransportPinned = false;

@@ -698,6 +698,15 @@ Preferences Preferences::load(QSettings &s) {
   p.tunnelHost =
       s.value("connection/tunnel-host").toString().trimmed().left(15);
   p.tunnelPort = qBound(0, s.value("connection/tunnel-port", 0).toInt(), 65535);
+  p.otgSerial =
+      s.value("otg/serial").toString().trimmed().left(256);
+  p.otgKeyboard = s.value("otg/keyboard", true).toBool();
+  p.otgMouse = s.value("otg/mouse", true).toBool();
+  p.otgGamepad = s.value("otg/gamepad", false).toBool();
+  if (!p.otgKeyboard && !p.otgMouse && !p.otgGamepad) {
+    p.otgKeyboard = true;
+    p.otgMouse = true;
+  }
   for (const auto &option : sessionOptions())
     p.options.insert(
         option.key, normalizedOption(option, s.value("options/" + option.key)));
@@ -736,6 +745,10 @@ void Preferences::save(QSettings &s) const {
   s.setValue("connection/force-adb-forward", forceAdbForward);
   s.setValue("connection/tunnel-host", tunnelHost);
   s.setValue("connection/tunnel-port", tunnelPort);
+  s.setValue("otg/serial", otgSerial);
+  s.setValue("otg/keyboard", otgKeyboard);
+  s.setValue("otg/mouse", otgMouse);
+  s.setValue("otg/gamepad", otgGamepad);
   for (const auto &option : sessionOptions())
     s.setValue("options/" + option.key,
                normalizedOption(option, options.value(option.key)));
@@ -1215,6 +1228,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
   wirelessTimeout.setSingleShot(true);
   stopTimeout.setSingleShot(true);
   audioCapabilityTimeout.setSingleShot(true);
+  otgCapabilityTimeout.setSingleShot(true);
   connect(&scanTimeout, &QTimer::timeout, this, [this] {
     scanTimedOut = true;
     scan.kill();
@@ -1229,8 +1243,10 @@ Engine::Engine(QObject *parent) : QObject(parent) {
   connect(&stopTimeout, &QTimer::timeout, this, [this] {
     if (running()) {
       forcedStop = true;
-      emit message("scrcpy did not exit; forcing it to stop. A recording may "
-                   "be incomplete.");
+      emit message(activeOtg
+                       ? "USB control did not exit; forcing it to stop."
+                       : "scrcpy did not exit; forcing it to stop. A "
+                         "recording may be incomplete.");
       mirror.kill();
     }
   });
@@ -1242,6 +1258,18 @@ Engine::Engine(QObject *parent) : QObject(parent) {
     stopping = true;
     emit message("The bundled engine does not support audio-only lifecycle "
                  "reporting. Reinstall this DroidCast build.");
+    mirror.write("Q", 1);
+    stopTimeout.start(5000);
+    emit sessionChanged();
+  });
+  connect(&otgCapabilityTimeout, &QTimer::timeout, this, [this] {
+    if (!running() || !activeOtg || state != SessionState::Starting)
+      return;
+    state = SessionState::Failed;
+    stopping = true;
+    otgLifecycleFailure = true;
+    emit message("The bundled engine did not confirm USB control readiness. "
+                 "Reinstall this DroidCast build.");
     mirror.write("Q", 1);
     stopTimeout.start(5000);
     emit sessionChanged();
@@ -1281,13 +1309,18 @@ Engine::Engine(QObject *parent) : QObject(parent) {
   });
   connect(&mirror, &QProcess::started, this, [this] {
     if (!stopping) {
-      emit message(activeAudioOnly
+      emit message(activeOtg
+                       ? "Opening the local USB device. Waiting for AOA "
+                         "control…"
+                   : activeAudioOnly
                        ? "Connecting to the phone. Waiting for the first "
                          "audio packet…"
                        : "Connecting to the phone. Waiting for the first "
                          "video frame…");
       if (activeAudioOnly)
         audioCapabilityTimeout.start(2000);
+      if (activeOtg)
+        otgCapabilityTimeout.start(3000);
     }
     emit sessionChanged();
   });
@@ -1296,15 +1329,22 @@ Engine::Engine(QObject *parent) : QObject(parent) {
             if (error == QProcess::FailedToStart) {
               stopTimeout.stop();
               audioCapabilityTimeout.stop();
+              otgCapabilityTimeout.stop();
               bridgeCommandTimeout.stop();
               state = SessionState::Failed;
               stopping = false;
+              const bool otg = activeOtg;
               activeSerial.clear();
               activeRecording.clear();
               activeTransportPinned = false;
               activeAdbServerSocket.clear();
-              emit message("The bundled mirror engine could not start. See "
-                           "Diagnostics or reinstall DroidCast Desktop.");
+              emit message(otg
+                               ? "The bundled USB control engine could not "
+                                 "start. See Diagnostics or reinstall "
+                                 "DroidCast Desktop."
+                               : "The bundled mirror engine could not start. "
+                                 "See Diagnostics or reinstall DroidCast "
+                                 "Desktop.");
               emit sessionChanged();
             }
           });
@@ -1312,6 +1352,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
           [this](int code, QProcess::ExitStatus status) {
             stopTimeout.stop();
             audioCapabilityTimeout.stop();
+            otgCapabilityTimeout.stop();
             bridgeCommandTimeout.stop();
             pendingBridgeCommand = 0;
             readMirrorOutput();
@@ -1321,6 +1362,7 @@ Engine::Engine(QObject *parent) : QObject(parent) {
             const bool clean = code == 0 && status == QProcess::NormalExit &&
                                !forcedStop && !recordingFailed;
             const bool recording = !activeRecording.isEmpty();
+            const bool otg = activeOtg;
             if (!clean && state != SessionState::Disconnected)
               state = SessionState::Failed;
             else if (state != SessionState::Disconnected &&
@@ -1331,24 +1373,37 @@ Engine::Engine(QObject *parent) : QObject(parent) {
             activeTransportPinned = false;
             activeAdbServerSocket.clear();
             if (forcedStop)
-              emit message("The engine was forced to stop. Any recording may "
-                           "be incomplete.");
+              emit message(otg ? "USB control was forced to stop. Check "
+                                 "Diagnostics before reconnecting."
+                               : "The engine was forced to stop. Any recording "
+                                 "may be incomplete.");
             else if (recording && (!recordingFinalized || recordingFailed))
               emit message("Recording finalization was not confirmed. The file "
                            "may be incomplete; see Diagnostics.");
             else if (state == SessionState::Disconnected)
-              emit message(
-                  "Phone disconnected. Reconnect it and start a new session.");
+              emit message(otg ? "USB device disconnected. Reconnect it and "
+                                 "start USB control again."
+                               : "Phone disconnected. Reconnect it and start "
+                                 "a new session.");
             else if (state == SessionState::Failed)
-              emit message(audioLifecycleFailure
+              emit message(otg ? (otgLifecycleFailure
+                                      ? "USB control readiness was not "
+                                        "confirmed. Reinstall this DroidCast "
+                                        "build."
+                                      : "USB control ended with an error. "
+                                        "Check the cable, USB permissions and "
+                                        "Diagnostics.")
+                           : audioLifecycleFailure
                                ? "Audio-only is unavailable in the bundled "
                                  "engine. Reinstall DroidCast Desktop."
                                : "scrcpy exited with an error. Open "
                                  "Diagnostics for details.");
             else
-              emit message(
-                  recording ? "Recording finalized. Session ended."
-                            : "Session ended. You can start another session.");
+              emit message(otg ? "USB control ended. You can reconnect or "
+                                 "start another session."
+                           : recording
+                               ? "Recording finalized. Session ended."
+                               : "Session ended. You can start another session.");
             stopping = false;
             emit fpsControlsChanged();
             emit appLaunchControlsChanged();
@@ -1541,6 +1596,10 @@ void Engine::prepareAdbProcess(QProcess &process) const {
 void Engine::refresh() {
   if (scanning())
     return;
+  if (otgSession()) {
+    emit message("ADB discovery is paused during USB control.");
+    return;
+  }
   const auto issue = connectionIssue(preferences);
   if (!issue.isEmpty()) {
     devices.clear();
@@ -1653,6 +1712,7 @@ bool Engine::start(const QString &serial, const QString &recording) {
   auto env = processEnvironment(true);
   activeSerial = serial;
   activeRecording = recording;
+  activeOtg = false;
   activeAudioOnly = preferences.options.value("audio-only", false).toBool();
   activeAudioPlayback =
       !preferences.options.value("no-audio-playback", false).toBool();
@@ -1688,6 +1748,7 @@ bool Engine::start(const QString &serial, const QString &recording) {
   appCommandsHealthy = true;
   audioLifecycleReady = false;
   audioLifecycleFailure = false;
+  otgLifecycleFailure = false;
   pendingBridgeCommand = 0;
   emit windowControlMessage(activeAudioOnly
                                 ? "Audio-only sessions have no mirror window."
@@ -1735,18 +1796,100 @@ bool Engine::start(const QString &serial, const QString &recording) {
   return true;
 }
 
+bool Engine::startOtg(const QString &serial, bool keyboard, bool mouse,
+                      bool gamepad) {
+  if (running())
+    return false;
+  if (scanning() || wirelessBusy() || deviceBusy()) {
+    emit message("Wait for the current ADB operation to finish before starting "
+                 "USB control.");
+    return false;
+  }
+  const auto selectedSerial = serial.trimmed();
+  if (selectedSerial.size() > 256 ||
+      selectedSerial.contains(QRegularExpression("[\\x00-\\x1f\\x7f]"))) {
+    emit message("USB serial must be at most 256 characters and contain no "
+                 "control characters.");
+    return false;
+  }
+  if (!keyboard && !mouse && !gamepad) {
+    emit message("Enable at least one USB control: keyboard, mouse or gamepad.");
+    return false;
+  }
+  if (executablePath(preferences.scrcpy).isEmpty()) {
+    emit message("DroidCast's control engine is missing. Reinstall the "
+                 "complete app package.");
+    return false;
+  }
+
+  activeSerial = selectedSerial.isEmpty() ? "Automatic USB selection"
+                                          : selectedSerial;
+  activeRecording.clear();
+  activeOtg = true;
+  activeAudioOnly = false;
+  activeAudioPlayback = false;
+  activeReadOnly = false;
+  activeCamera = false;
+  activeAlternateDisplay = false;
+  activeFlexibleDisplay = false;
+  activeTransportPinned = false;
+  activeAdbServerSocket.clear();
+  stopping = false;
+  state = SessionState::Starting;
+  windowCommandsReady = cameraCommandsReady = androidCommandsReady = false;
+  clipboardCommandsReady = fpsCommandsReady = appCommandsReady = false;
+  windowCommandsHealthy = cameraCommandsHealthy = androidCommandsHealthy = true;
+  clipboardCommandsHealthy = fpsCommandsHealthy = appCommandsHealthy = true;
+  fpsMeasurementActive = false;
+  audioLifecycleReady = audioLifecycleFailure = false;
+  otgLifecycleFailure = false;
+  pendingBridgeCommand = 0;
+  forcedStop = bridgeReady = recordingFinalized = recordingFailed = false;
+  mirrorOutput.clear();
+
+  emit windowControlMessage("USB control has no mirrored video window tools.");
+  emit cameraControlMessage("USB control has no camera stream.");
+  emit androidControlMessage(
+      "Use the AOA keyboard, mouse or gamepad in the USB control window.");
+  emit clipboardControlMessage("USB control has no Android clipboard channel.");
+  emit fpsControlMessage("USB control does not render video frames.");
+  emit appLaunchMessage("USB control has no ADB application channel.");
+
+  sessionToken = QUuid::createUuid().toString(QUuid::Id128).toLatin1();
+  auto env = processEnvironment(true);
+  // OTG is a local libusb session. In particular, its optional Windows ADB
+  // shutdown must never target a configured or inherited remote ADB server.
+  env.remove("ADB_SERVER_SOCKET");
+  env.insert("DROIDCAST_SESSION_TOKEN", QString::fromLatin1(sessionToken));
+  mirror.setProcessEnvironment(env);
+  QStringList args{"--otg",
+                   keyboard ? "--keyboard=aoa" : "--keyboard=disabled",
+                   mouse ? "--mouse=aoa" : "--mouse=disabled",
+                   gamepad ? "--gamepad=aoa" : "--gamepad=disabled",
+                   "--window-title=DroidCast USB control"};
+  if (!selectedSerial.isEmpty())
+    args.prepend("--serial=" + selectedSerial);
+  emit log("Starting " + preferences.scrcpy +
+           "\nArguments: " + args.join(" | "));
+  mirror.start(preferences.scrcpy, args);
+  emit sessionChanged();
+  return true;
+}
+
 void Engine::stop() {
   if (!running() || stopping)
     return;
   stopping = true;
   audioCapabilityTimeout.stop();
+  otgCapabilityTimeout.stop();
   bridgeCommandTimeout.stop();
   pendingBridgeCommand = 0;
   fpsMeasurementActive = false;
   emit fpsControlsChanged();
   emit appLaunchControlsChanged();
   state = SessionState::Stopping;
-  emit message("Stopping session and finishing any recording…");
+  emit message(activeOtg ? "Stopping USB control…"
+                         : "Stopping session and finishing any recording…");
   // The fork handles this on its SDL event loop, following window-close
   // cleanup. QProcess buffers the byte if the process is still starting.
   mirror.write("Q", 1);
@@ -1759,19 +1902,20 @@ QString Engine::sessionStateText() const {
   case SessionState::Idle:
     return "No active session";
   case SessionState::Starting:
-    return "Starting session";
+    return activeOtg ? "Starting USB control" : "Starting session";
   case SessionState::Streaming:
-    return activeAudioOnly
+    return activeOtg ? "Controlling over USB"
+           : activeAudioOnly
                ? (activeAudioPlayback ? "Listening" : "Recording audio")
                : "Streaming";
   case SessionState::Stopping:
-    return "Finishing session";
+    return activeOtg ? "Stopping USB control" : "Finishing session";
   case SessionState::Ended:
     return "Session ended";
   case SessionState::Failed:
-    return "Session failed";
+    return activeOtg ? "USB control failed" : "Session failed";
   case SessionState::Disconnected:
-    return "Phone disconnected";
+    return activeOtg ? "USB device disconnected" : "Phone disconnected";
   }
   return {};
 }
@@ -1790,7 +1934,13 @@ void Engine::readMirrorOutput() {
     const auto event = line.mid(prefix.size());
     if (event == "bridge-ready")
       bridgeReady = true;
-    else if (event == "audio-lifecycle-ready" && bridgeReady) {
+    else if (event == "otg-ready" && bridgeReady && activeOtg &&
+             state == SessionState::Starting) {
+      otgCapabilityTimeout.stop();
+      state = SessionState::Streaming;
+      emit message("USB control is ready. Focus the control window to send "
+                   "keyboard, mouse or gamepad input.");
+    } else if (event == "audio-lifecycle-ready" && bridgeReady) {
       audioLifecycleReady = true;
       audioCapabilityTimeout.stop();
     } else if (event == "first-audio-packet" && bridgeReady &&
@@ -1802,6 +1952,7 @@ void Engine::readMirrorOutput() {
                        : "Phone audio is being recorded without local "
                          "playback.");
     } else if (event == "first-frame" && bridgeReady && !activeAudioOnly &&
+               !activeOtg &&
                state == SessionState::Starting) {
       state = SessionState::Streaming;
       emit message("Phone video is streaming in the mirror window.");
@@ -2331,6 +2482,11 @@ void Engine::launchApp(const QString &package) {
 }
 
 void Engine::connectWireless(const QString &endpoint, const QString &code) {
+  if (otgSession()) {
+    emit message("Wireless ADB is unavailable during USB control. Stop USB "
+                 "control first.");
+    return;
+  }
   if (wirelessBusy())
     return;
   const auto transportIssue = connectionIssue(preferences);
@@ -2356,6 +2512,10 @@ void Engine::connectWireless(const QString &endpoint, const QString &code) {
 }
 
 bool Engine::canUseDevice(const QString &serial) {
+  if (otgSession()) {
+    emit message("ADB device tools are unavailable during USB control.");
+    return false;
+  }
   if (deviceBusy())
     return false;
   const auto issue = connectionIssue(preferences);
@@ -2500,7 +2660,7 @@ void Engine::cancelDeviceTask() {
 
 bool Engine::controlAllowed() const {
   return !stopping &&
-         !(running() ? activeReadOnly
+         !(running() ? (activeReadOnly || activeOtg)
                      : preferences.options.value("no-control", false).toBool());
 }
 

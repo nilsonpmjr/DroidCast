@@ -13,7 +13,7 @@ their normal stdin behavior. The desktop generates a new token per launch.
   `Q` is reserved as the quit command outside a framed payload.
 - Child → parent stdout: `DROIDCAST/1 <token> <event>\n`.
 - Events: `bridge-ready`, `bridge-error`, `audio-lifecycle-ready`,
-  `first-frame`, `first-audio-packet`, `recording-finalized`,
+  `otg-ready`, `first-frame`, `first-audio-packet`, `recording-finalized`,
   `recording-error`, `ended`, `disconnected`, `failed`.
 - Window events: `window-controls-ready` and
   `window-result:<byte>:handled` / `window-result:<byte>:unavailable`.
@@ -36,6 +36,9 @@ their normal stdin behavior. The desktop generates a new token per launch.
   packet is accepted by the active sinks. This also covers record-only sessions
   with host playback disabled. The desktop requires both events before declaring
   an audio-only session active; process startup alone is not audio readiness.
+- `otg-ready` is emitted only after libusb has selected and opened the local
+  USB device, the AOA worker is running and the input-capture window exists.
+  OTG does not emit frame or audio readiness because it carries neither stream.
 - Recording status comes from the recorder callback after trailer/output close;
   process completion is still required before a new session can begin.
 - Stderr remains ordinary diagnostic output. The desktop accepts only exact

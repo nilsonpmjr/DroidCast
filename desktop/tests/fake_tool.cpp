@@ -158,6 +158,7 @@ int main(int argc, char **argv) {
     out.flush();
   };
   report("bridge-ready");
+  const bool otg = args.contains("--otg");
   if (mode != "old-audio-lifecycle")
     report("audio-lifecycle-ready");
   // Log text and events from a different session cannot establish readiness.
@@ -165,10 +166,12 @@ int main(int argc, char **argv) {
          "first-frame\n";
   out.flush();
   const bool audioOnly = args.contains("--no-video");
-  if (mode != "no-frame" && mode != "old-audio-lifecycle")
+  if (mode != "no-frame" && mode != "old-audio-lifecycle" &&
+      mode != "old-otg-lifecycle")
     QTimer::singleShot(100, &app, [&] {
-      report(audioOnly ? "first-audio-packet" : "first-frame");
-      if (audioOnly)
+      report(otg ? "otg-ready"
+                 : audioOnly ? "first-audio-packet" : "first-frame");
+      if (otg || audioOnly)
         return;
       if (mode != "old-bridge") {
         report("window-controls-ready");

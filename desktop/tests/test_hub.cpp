@@ -1563,6 +1563,89 @@ private slots:
     QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 6000);
 #endif
   }
+  void otgLifecycleDoesNotRequireAnAdbDevice() {
+    const auto argumentLog = storage.filePath("otg-arguments.log");
+    QFile::remove(argumentLog);
+    qputenv("HUB_ENV_LOG", argumentLog.toUtf8());
+    qputenv("ADB_SERVER_SOCKET", "tcp:inherited.example:5037");
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    engine.preferences.remoteAdb = true;
+    engine.preferences.adbServerEndpoint = "remote.example:5037";
+    engine.devices.clear();
+    QSignalSpy messages(&engine, &Engine::message);
+
+    QVERIFY(!engine.startOtg({}, false, false, false));
+    QVERIFY(messages.last().first().toString().contains("at least one"));
+    QVERIFY(!engine.startOtg(QString(257, 'x'), true, false, false));
+    QVERIFY(messages.last().first().toString().contains("256"));
+
+    QVERIFY(engine.startOtg("USB-OTG-123", true, false, true));
+    QVERIFY(engine.otgSession());
+    QVERIFY(!engine.controlAllowed());
+    QVERIFY(!engine.captureAllowed("USB-OTG-123"));
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Starting);
+    QTRY_COMPARE_WITH_TIMEOUT(engine.sessionState(),
+                              Engine::SessionState::Streaming, 3000);
+    QCOMPARE(engine.sessionStateText(), QString("Controlling over USB"));
+    QVERIFY(!engine.windowControlsAvailable());
+    engine.refresh();
+    QVERIFY(!engine.scanning());
+    QVERIFY(messages.last().first().toString().contains("paused"));
+    engine.connectWireless("phone.local:5555");
+    QVERIFY(!engine.wirelessBusy());
+    QVERIFY(messages.last().first().toString().contains("unavailable"));
+    engine.stop();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Ended);
+    QVERIFY(!engine.otgSession());
+
+    QFile log(argumentLog);
+    QVERIFY(log.open(QIODevice::ReadOnly | QIODevice::Text));
+    const auto arguments = QString::fromUtf8(log.readAll());
+    QVERIFY(arguments.contains("--otg"));
+    QVERIFY(arguments.contains("--serial=USB-OTG-123"));
+    QVERIFY(arguments.contains("--keyboard=aoa"));
+    QVERIFY(arguments.contains("--mouse=disabled"));
+    QVERIFY(arguments.contains("--gamepad=aoa"));
+    const auto launchLine = arguments.split('\n', Qt::SkipEmptyParts).first();
+    QCOMPARE(launchLine.section('\t', 1, 1), QString());
+    log.close();
+
+    qputenv("HUB_TEST_MODE", "disconnect");
+    QVERIFY(engine.startOtg({}, true, true, false));
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 3000);
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Disconnected);
+    QCOMPARE(engine.sessionStateText(), QString("USB device disconnected"));
+
+    qputenv("HUB_TEST_MODE", "old-otg-lifecycle");
+    QVERIFY(engine.startOtg({}, true, true, false));
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 5000);
+    QCOMPARE(engine.sessionState(), Engine::SessionState::Failed);
+    QVERIFY(messages.last().first().toString().contains("readiness"));
+    qunsetenv("HUB_ENV_LOG");
+    qunsetenv("ADB_SERVER_SOCKET");
+  }
+  void otgPreferencesPersistWithoutAllowingAnEmptyInputSet() {
+    QSettings settings(storage.filePath("otg.ini"), QSettings::IniFormat);
+    Preferences prefs = bundledPreferences();
+    prefs.otgSerial = "USB SERIAL";
+    prefs.otgKeyboard = false;
+    prefs.otgMouse = true;
+    prefs.otgGamepad = true;
+    prefs.save(settings);
+    auto restored = Preferences::load(settings);
+    QCOMPARE(restored.otgSerial, QString("USB SERIAL"));
+    QVERIFY(!restored.otgKeyboard);
+    QVERIFY(restored.otgMouse);
+    QVERIFY(restored.otgGamepad);
+    settings.setValue("otg/keyboard", false);
+    settings.setValue("otg/mouse", false);
+    settings.setValue("otg/gamepad", false);
+    restored = Preferences::load(settings);
+    QVERIFY(restored.otgKeyboard);
+    QVERIFY(restored.otgMouse);
+  }
   void controlAndShortcutOptionsStaySafeAndSeparate() {
     Preferences prefs;
     prefs.options = {{"no-clipboard-autosync", true},
@@ -2504,7 +2587,7 @@ private slots:
     auto *stop = window.findChild<QPushButton *>("stopMirror");
     QVERIFY(list && start && stop);
     QTRY_COMPARE(list->count(), 2);
-    QVERIFY(start->isEnabled());
+    QTRY_VERIFY(start->isEnabled());
     QVERIFY(!stop->isEnabled());
     list->setCurrentRow(1);
     QVERIFY(!start->isEnabled());
@@ -2664,6 +2747,59 @@ private slots:
     QCOMPARE(audio[0]->isChecked(), audio[1]->isChecked());
     QCOMPARE(window.windowTitle(), "DroidCast Desktop");
     QCOMPARE(window.findChild<QListWidget *>("navigation")->count(), 7);
+  }
+  void otgWorkspaceExplainsAndRunsControlOnlyMode() {
+    QSettings settings;
+    auto prefs = bundledPreferences();
+    prefs.otgSerial.clear();
+    prefs.otgKeyboard = true;
+    prefs.otgMouse = true;
+    prefs.otgGamepad = false;
+    prefs.save(settings);
+    Window window;
+    window.resize(920, 680);
+    window.show();
+    window.showPage(4);
+    auto *card = window.findChild<QWidget *>("otgControlCard");
+    auto *topology = window.findChild<QWidget *>("otgTopology");
+    auto *serial = window.findChild<QLineEdit *>("otgSerial");
+    auto *keyboard = window.findChild<QCheckBox *>("otgKeyboard");
+    auto *mouse = window.findChild<QCheckBox *>("otgMouse");
+    auto *gamepad = window.findChild<QCheckBox *>("otgGamepad");
+    auto *start = window.findChild<QPushButton *>("startOtg");
+    auto *stop = window.findChild<QPushButton *>("stopOtg");
+    auto *status = window.findChild<QLabel *>("otgStatus");
+    QVERIFY(card && topology && serial && keyboard && mouse && gamepad &&
+            start && stop && status);
+    QVERIFY(card->isVisible());
+    QVERIFY(topology->isVisible());
+    QVERIFY(serial->placeholderText().contains("only eligible USB device"));
+    QVERIFY(start->isEnabled());
+    QVERIFY(!stop->isEnabled());
+    keyboard->setChecked(false);
+    mouse->setChecked(false);
+    QVERIFY(!start->isEnabled());
+    gamepad->setChecked(true);
+    QVERIFY(start->isEnabled());
+    serial->setText("UI-USB-1");
+    start->click();
+    QTRY_COMPARE_WITH_TIMEOUT(status->text(), QString("Controlling over USB"),
+                              3000);
+    QVERIFY(!start->isEnabled());
+    QVERIFY(stop->isEnabled());
+    QVERIFY(!window.findChild<QPushButton *>("refreshDevices")->isEnabled());
+    window.showPage(1);
+    auto *detail = window.findChild<QLabel *>("sessionDetail");
+    QVERIFY(detail->text().contains("USB control only"));
+    QVERIFY(!window.findChild<QWidget *>("displaySessionTools")->isVisible());
+    window.showPage(4);
+    stop->click();
+    QTRY_VERIFY_WITH_TIMEOUT(start->isEnabled(), 3000);
+    QTRY_VERIFY(!stop->isEnabled());
+    auto *scroll = qobject_cast<QScrollArea *>(
+        window.findChild<QStackedWidget *>()->currentWidget());
+    QVERIFY(scroll);
+    QTRY_COMPARE(scroll->horizontalScrollBar()->maximum(), 0);
   }
 
 private:

@@ -492,3 +492,23 @@ device compatibility testing remain open.
 - Added argument, persistence, local-USB/remote/wireless/platform guard, dependency,
   live-map and 920×680 tests. Real keyboards, mice, gamepads, drivers and phone USB
   behavior remain release-proof work.
+
+## Part 25: dedicated USB OTG control sessions
+
+- Added an ADB-independent USB control path to Input & controls and a welcome-state
+  route for phones that intentionally have USB debugging disabled. Its hardware
+  topology makes the boundary explicit: computer inputs travel over USB/AOA to Android,
+  with no mirrored video, forwarded audio, recording or ADB device tools.
+- Added persistent keyboard, mouse and gamepad selection plus an optional USB serial.
+  An empty serial delegates to scrcpy's safe single-device selection; multiple-device
+  enumeration remains a named follow-up rather than borrowing unverified ADB records.
+- Extended the private fork bridge with `otg-ready`. The engine stays Starting until
+  libusb has selected and opened a device, the AOA worker is running and the focused
+  control window exists. Disconnect, AOA failure, normal stop and forced-stop paths
+  preserve the established session state machine.
+- Added Linux udev and Windows WinUSB/ADB-ownership guidance. During OTG the active
+  workspace hides mirror, media, screenshot, application and Android-channel controls,
+  while Stop remains available.
+- Added argument, validation, persistence, no-ADB-device, lifecycle, UI context and
+  920×680 tests. Real AOA input, multi-device selection, driver failures and reconnect
+  behavior remain hardware proof in the gap register.

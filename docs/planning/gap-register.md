@@ -22,7 +22,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Bundled runtime | Partial | The forked client, ADB and matching server are launched without executable pickers. | Clean-machine packages, signing and Windows/macOS verification. |
 | Session lifecycle | Partial | First-video-frame or first-audio-packet state, graceful stop, recording finalization and disconnect/failure states. | Real unplug/reconnect and playable-recording tests on phones. |
 | Device workspace | Partial | USB discovery, wireless pair/connect, screenshots, APK install and selected-device targeting. | Complete pair-to-mirror guidance and broader recovery testing. |
-| Configuration routes | Partial | Connection/Tunnels plus searchable Video, Camera, Audio, Control, Device, Window, Keyboard, Mouse, Gamepad, Shortcuts, Recording and Virtual display routes. | OTG and Video4Linux routes, plus remaining advanced option coverage. |
+| Configuration routes | Partial | Connection/Tunnels, a dedicated OTG control workspace, plus searchable Video, Camera, Audio, Control, Device, Window, Keyboard, Mouse, Gamepad, Shortcuts, Recording and Virtual display routes. | Video4Linux route and remaining advanced option coverage. |
 | Toolbar | Partial | Back/Home/Recents, power/volume, screen power, system panels, explicit clipboard copy/paste, inspected-app launch, one-file transfer, Android/window rotation, reset video, mirror-window actions, rendered-FPS measurement and contextual camera controls. | Decide whether multi-file drag/drop and transfer progress belong in release scope. |
 | Video | Partial | Codec, bitrate, FPS, size, crop, orientation, guided inspected display/encoder choices, manual fallback and raw report. | Additional codec options, constraint overrides and hardware proof. |
 | Audio | Partial | Enablement, all capture sources, Android playback duplication, codec-matched inspected/manual encoder, bitrate, require-audio, host playback/buffers, first-packet-backed audio-only sessions and codec-safe dedicated recording formats. | Physical-device output and playable-file proof. |
@@ -31,7 +31,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Camera | Partial | Source, ID/facing, guided declared size/FPS/high-speed choices, manual fallback, startup torch/zoom and live torch/zoom. | Android-version/capability gates and real camera tests. |
 | Recording | Partial | Mode-specific MKV/MP4/MKA/M4A/OPUS/AAC/FLAC/WAV, codec validation, migration, unique paths, filters and graceful finalization state. | Playback verification of real files after normal and abnormal endings. |
 | Embedded video | Open decision | The engine opens a separate native mirror window. | Decide release scope; prototype a real frame inside Qt before promising it. |
-| OTG | Open | Nothing end to end. | USB discovery without ADB, control-only session model, drivers and hardware tests. |
+| OTG | Partial | A dedicated ADB-independent control-only session launches keyboard/mouse/gamepad AOA, waits for native USB readiness, stops cleanly and hides media/ADB tools. Automatic single-device selection and an optional USB serial handle current selection. | Enumerate eligible libusb devices in the UI, improve multiple-device recovery, and complete Linux/Windows hardware/driver tests. |
 | Remote tunnels | Partial | Local/remote ADB route, forced-forward tunnel options, persistence and one transport snapshot across every ADB/scrcpy child are covered by automated tests. | Real remote ADB and SSH tunnel journeys, unreachable-host recovery review and Windows/macOS proof. |
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
@@ -85,16 +85,21 @@ secondary and Shift mouse buttons; multiple gamepads; disconnect recovery; Linux
 AOA mirroring; and the expected Windows rejection. Driver or phone permission failures
 must remain visible rather than being reported as successful input attachment.
 
-## Next implementation: dedicated OTG control mode
+## OTG control checkpoint
 
-1. Add a separate “USB control only” session type with no video/audio promises and no
-   dependency on an ADB-authorized device.
-2. Discover eligible local USB devices through the engine/libusb path and distinguish
-   them from the existing ADB list; never infer OTG eligibility from an ADB serial.
-3. Launch `--otg` with AOA keyboard/mouse/gamepad choices, truthful Windows driver
-   guidance, stop/reconnect lifecycle and no mirror-only toolbar controls.
-4. Add fake-process lifecycle and UI coverage, then verify with USB debugging disabled
-   on real Linux and Windows hardware before marking ticket 22 implemented.
+The product now has a separate “USB control only” session with no video/audio promise
+and no ADB-authorized-device gate. It launches `--otg` with explicit AOA keyboard,
+mouse and gamepad choices, persists those choices and an optional USB serial, reports
+platform permission/driver constraints, waits for the fork's structured `otg-ready`
+event, and reuses graceful stop/disconnect recovery. Mirror, recording, screenshot,
+application and ADB controls are hidden for the active OTG session. Automated process,
+persistence, bridge, UI and minimum-size coverage exists.
+
+The remaining product gap is discoverability when several eligible USB devices are
+present. Add a fork-owned libusb enumeration command and a separate picker; never copy
+or infer this list from ADB. Then test with USB debugging disabled on real Linux and
+Windows hardware, including udev access denial, WinUSB driver failure, unplug and
+reconnect, before promoting ticket 22 from Partial to Implemented.
 
 ## Release-proof still required for recent work
 

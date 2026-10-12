@@ -10,6 +10,7 @@ class QPlainTextEdit;
 class QCloseEvent;
 class QComboBox;
 class QLineEdit;
+class QCheckBox;
 class Window : public QMainWindow {
   Q_OBJECT
 public:
@@ -35,7 +36,10 @@ private:
   QPushButton *startButton, *recordButton, *stopButton, *refreshButton,
       *screenshotButton, *apkButton, *sessionStop, *appLaunchButton;
   QPushButton *choosePushFileButton, *pushFileButton, *cancelPushButton;
-  QLineEdit *pushDestination;
+  QPushButton *otgStartButton, *otgStopButton;
+  QLineEdit *pushDestination, *otgSerialInput;
+  QCheckBox *otgKeyboardToggle, *otgMouseToggle, *otgGamepadToggle;
+  QLabel *otgStatus;
   QPlainTextEdit *logs;
   QComboBox *captureFilter,
       *mouseModeSelector = nullptr, *sessionAppSelector = nullptr,

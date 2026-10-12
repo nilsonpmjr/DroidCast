@@ -143,6 +143,7 @@ these broader tickets complete.
     - **Verification:** Real camera capture, camera selection and supported live controls; high-speed and unsupported-mode tests use capability-specific evidence.
 
 22. **Control a phone over USB OTG without ADB**
+    - **Status:** Partial; control-only lifecycle and manual/automatic single-device selection are implemented, while UI enumeration and hardware proof remain.
     - **Blocked by:** 13, category routes.
     - **What it delivers:** Discover/select an eligible USB device and start an OTG keyboard/mouse/gamepad session without requiring USB debugging.
     - **Acceptance:** Do not use the ADB-authorized-device gate; label the mode as control-only with no audio/video; expose transport/driver restrictions; stop and reconnect recover cleanly.

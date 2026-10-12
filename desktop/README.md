@@ -110,9 +110,9 @@ Windows/macOS build paths have not yet been exercised.
   synchronization and compatibility-paste policies, a safe mirror-window drop
   destination, and routes to advanced Control, keyboard, mouse and gamepad
   settings. A visual four-button map validates primary/Shift mouse bindings.
-  AOA keyboard, mouse and gamepad choices are restricted to local USB sessions;
-  Windows keeps AOA for the future OTG-only path. The default shortcut modifier
-  remains left Alt / left Super.
+  AOA keyboard, mouse and gamepad choices are restricted to local USB sessions.
+  The dedicated OTG workspace uses them without ADB or media and is the supported
+  Windows AOA path. The default shortcut modifier remains left Alt / left Super.
 - **Settings:** searchable categories for video, camera, audio, control, device,
   window, keyboard, mouse, gamepad, shortcuts, recording and virtual displays. Includes read-only
   mode, buffering, orientation,
@@ -202,8 +202,8 @@ artwork: the iMac variant for desktop hosts and the MacBook variant when a lapto
 can be identified from host power/model information. Unknown form factors safely
 fall back to Desktop. The original TS project remains untouched.
 
-Next: complete the Control and Shortcuts routes; validate remote ADB/SSH tunnel,
-display, virtual-display, Android actions, audio recordings,
+Next: add fork-owned libusb enumeration to the OTG picker; validate remote ADB/SSH
+tunnel, display, virtual-display, Android actions, audio recordings,
 clipboard, measured FPS, live app launch and camera sessions with physical devices;
 prototype embedded video before deciding its release scope; add per-device profiles
 and concurrent sessions; then finish standalone platform installers.

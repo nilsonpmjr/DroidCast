@@ -191,9 +191,11 @@ Window::Window(QWidget *parent) : QMainWindow(parent) {
   connect(&engine, &Engine::log, logs, &QPlainTextEdit::appendPlainText);
   connect(&engine, &Engine::devicesChanged, this, &Window::updateDevices);
   connect(&engine, &Engine::scanChanged, this, [this] {
-    refreshButton->setEnabled(!engine.scanning());
+    refreshButton->setEnabled(!engine.scanning() && !engine.otgSession());
     refreshButton->setText(engine.scanning() ? "Scanning…" : "Scan devices");
+    updateActions();
   });
+  connect(&engine, &Engine::wirelessChanged, this, &Window::updateActions);
   connect(&engine, &Engine::sessionChanged, this, [this] {
     if (engine.running() && !elapsed.isValid())
       elapsed.start();
@@ -211,7 +213,8 @@ Window::Window(QWidget *parent) : QMainWindow(parent) {
   connect(&engine, &Engine::deviceTaskChanged, this, &Window::updateActions);
   connect(&engine, &Engine::captureSaved, this, [this] { updateCaptures(); });
   connect(&poll, &QTimer::timeout, this, [this] {
-    if (!closing && !executablePath(engine.preferences.adb).isEmpty())
+    if (!closing && !engine.otgSession() &&
+        !executablePath(engine.preferences.adb).isEmpty())
       engine.refresh();
   });
   poll.start(4000);
@@ -275,6 +278,12 @@ QWidget *Window::devicesPage() {
       label("2   Connect your phone with a USB data cable."));
   instructions->addWidget(
       label("3   Unlock it and allow the debugging request."));
+  auto *otgRoute = button("Control by USB without debugging", "input");
+  otgRoute->setObjectName("welcomeOtgRoute");
+  otgRoute->setToolTip("Open the AOA control-only mode. No ADB authorization "
+                       "or mirrored display is required.");
+  connect(otgRoute, &QPushButton::clicked, this, [this] { showPage(4); });
+  instructions->addWidget(otgRoute);
   intro->addLayout(instructions, 3);
   welcomeLayout->addLayout(intro);
   layout->addWidget(welcome);
@@ -1030,6 +1039,115 @@ QWidget *Window::inputPage() {
                       "Choose how your keyboard and mouse interact with "
                       "Android. Changes apply to the next session.",
                       layout);
+  QVBoxLayout *otg;
+  auto *otgCard = card(otg);
+  otgCard->setObjectName("otgControlCard");
+  auto *otgHeader = new QHBoxLayout;
+  auto *otgHeading = new QVBoxLayout;
+  otgHeading->addWidget(label("USB control only", "section"));
+  otgHeading->addWidget(label(
+      "Control a phone as physical USB accessories. USB debugging and ADB "
+      "authorization are not required.",
+      "muted"));
+  otgHeader->addLayout(otgHeading, 1);
+  otgStatus = label("No USB control session", "badge");
+  otgStatus->setObjectName("otgStatus");
+  otgHeader->addWidget(otgStatus, 0, Qt::AlignTop);
+  otg->addLayout(otgHeader);
+
+  QVBoxLayout *topology;
+  auto *topologyFrame = card(topology, "well");
+  topologyFrame->setObjectName("otgTopology");
+  auto *path = new QHBoxLayout;
+  auto addEndpoint = [&path](const QString &icon, const QString &title,
+                             const QString &detail) {
+    auto *column = new QVBoxLayout;
+    column->setAlignment(Qt::AlignCenter);
+    column->addWidget(iconLabel(icon, 30), 0, Qt::AlignHCenter);
+    auto *heading = label(title, "section");
+    heading->setAlignment(Qt::AlignCenter);
+    column->addWidget(heading);
+    auto *description = label(detail, "muted");
+    description->setAlignment(Qt::AlignCenter);
+    column->addWidget(description);
+    path->addLayout(column, 2);
+  };
+  addEndpoint("input", "Computer input", "Keyboard · mouse · gamepad");
+  auto *transport = new QVBoxLayout;
+  transport->setAlignment(Qt::AlignCenter);
+  transport->addWidget(label("━━━━━━", "muted"), 0, Qt::AlignHCenter);
+  transport->addWidget(label("USB · AOA", "badge"), 0, Qt::AlignHCenter);
+  transport->addWidget(label("No ADB", "muted"), 0, Qt::AlignHCenter);
+  path->addLayout(transport, 1);
+  addEndpoint("phone", "Android device", "Control only · no media stream");
+  topology->addLayout(path);
+  otg->addWidget(topologyFrame);
+
+  auto *otgInputs = new QHBoxLayout;
+  otgKeyboardToggle = toggle("Keyboard", engine.preferences.otgKeyboard);
+  otgKeyboardToggle->setObjectName("otgKeyboard");
+  otgMouseToggle = toggle("Mouse", engine.preferences.otgMouse);
+  otgMouseToggle->setObjectName("otgMouse");
+  otgGamepadToggle = toggle("Gamepad", engine.preferences.otgGamepad);
+  otgGamepadToggle->setObjectName("otgGamepad");
+  for (auto *control :
+       {otgKeyboardToggle, otgMouseToggle, otgGamepadToggle})
+    otgInputs->addWidget(control);
+  otgInputs->addStretch();
+  otg->addLayout(otgInputs);
+
+  auto *serialForm = new QFormLayout;
+  otgSerialInput = new QLineEdit(engine.preferences.otgSerial);
+  otgSerialInput->setObjectName("otgSerial");
+  otgSerialInput->setPlaceholderText(
+      "Leave empty to use the only eligible USB device");
+  otgSerialInput->setMaxLength(256);
+  field(serialForm, "USB serial (optional)", otgSerialInput);
+  otg->addLayout(serialForm);
+#ifdef Q_OS_WIN
+  otg->addWidget(label(
+      "Windows releases ADB before opening the device because both cannot "
+      "own the same USB interface. A compatible WinUSB driver may be needed.",
+      "muted"));
+#else
+  otg->addWidget(label(
+      "If access is denied on Linux, install the Android USB udev rules. "
+      "DroidCast reports the failure; it does not change system permissions.",
+      "muted"));
+#endif
+  otg->addWidget(label(
+      "This mode opens a focused input-capture window. It never shows video, "
+      "forwards audio, records media or exposes ADB tools.",
+      "muted"));
+  auto *otgActions = new QHBoxLayout;
+  otgStartButton = button("Start USB control", "play", "startOtg");
+  otgStartButton->setProperty("primary", true);
+  otgStopButton = button("Stop USB control", "stop", "stopOtg");
+  otgActions->addWidget(otgStartButton);
+  otgActions->addWidget(otgStopButton);
+  otgActions->addStretch();
+  otg->addLayout(otgActions);
+  auto persistOtg = [this] {
+    engine.preferences.otgSerial = otgSerialInput->text().trimmed();
+    engine.preferences.otgKeyboard = otgKeyboardToggle->isChecked();
+    engine.preferences.otgMouse = otgMouseToggle->isChecked();
+    engine.preferences.otgGamepad = otgGamepadToggle->isChecked();
+    savePreferences();
+    updateActions();
+  };
+  connect(otgSerialInput, &QLineEdit::textChanged, this, persistOtg);
+  for (auto *control :
+       {otgKeyboardToggle, otgMouseToggle, otgGamepadToggle})
+    connect(control, &QCheckBox::toggled, this, persistOtg);
+  connect(otgStartButton, &QPushButton::clicked, this, [this, persistOtg] {
+    persistOtg();
+    engine.startOtg(otgSerialInput->text(), otgKeyboardToggle->isChecked(),
+                    otgMouseToggle->isChecked(),
+                    otgGamepadToggle->isChecked());
+  });
+  connect(otgStopButton, &QPushButton::clicked, &engine, &Engine::stop);
+  layout->addWidget(otgCard);
+
   for (auto pair :
        {qMakePair(QString("Keyboard simulation"), &Preferences::keyboard),
         qMakePair(QString("Mouse simulation"), &Preferences::mouse)}) {
@@ -1067,11 +1185,11 @@ QWidget *Window::inputPage() {
 #ifdef Q_OS_WIN
   const auto aoaHelp =
       "AOA cannot share a mirrored USB phone with ADB on Windows. Use "
-      "SDK/UHID here; AOA will become usable in the separate OTG mode.";
+      "SDK/UHID for mirroring, or use USB control only above.";
 #else
   const auto aoaHelp =
       "AOA requires the selected phone to be attached to this computer by "
-      "USB. The future OTG mode will use it without mirroring or ADB.";
+      "USB. Use USB control only above when you do not want mirroring or ADB.";
 #endif
   layout->addWidget(label(aoaHelp, "muted"));
   auto *advancedInput =
@@ -2076,6 +2194,7 @@ QString Window::selectedSerial() const {
 void Window::updateActions() {
   const bool running = engine.running();
   const bool audioOnly = engine.audioOnlySession();
+  const bool otg = engine.otgSession();
   const auto capabilityTarget =
       running ? engine.activeSerial : selectedSerial();
   if (!cameraCapabilitySerial.isEmpty() &&
@@ -2106,6 +2225,23 @@ void Window::updateActions() {
   stopButton->setEnabled(running && engine.sessionState() !=
                                         Engine::SessionState::Stopping);
   sessionStop->setEnabled(stopButton->isEnabled());
+  const bool anyOtgInput = otgKeyboardToggle->isChecked() ||
+                           otgMouseToggle->isChecked() ||
+                           otgGamepadToggle->isChecked();
+  otgStartButton->setEnabled(!running && !engine.scanning() &&
+                             !engine.wirelessBusy() && !engine.deviceBusy() &&
+                             anyOtgInput);
+  otgStopButton->setEnabled(
+      otg && engine.sessionState() != Engine::SessionState::Stopping);
+  refreshButton->setEnabled(!engine.scanning() && !otg);
+  otgSerialInput->setEnabled(!running);
+  otgKeyboardToggle->setEnabled(!running);
+  otgMouseToggle->setEnabled(!running);
+  otgGamepadToggle->setEnabled(!running);
+  otgStatus->setText(otg ? engine.sessionStateText()
+                         : running ? "Another session is active"
+                         : anyOtgInput ? "Ready when USB is connected"
+                                       : "Choose at least one input");
   bool activeReady = false;
   for (const auto &d : engine.devices)
     if (d.serial == engine.activeSerial && d.ready())
@@ -2161,11 +2297,12 @@ void Window::updateActions() {
   if (auto *cameraPanel = findChild<QWidget *>("cameraControlsPanel"))
     cameraPanel->setVisible(engine.cameraSession());
   if (auto *androidPanel = findChild<QWidget *>("androidControlsPanel"))
-    androidPanel->setVisible(running && !engine.cameraSession() && !audioOnly);
+    androidPanel->setVisible(running && !engine.cameraSession() && !audioOnly &&
+                             !otg);
   if (auto *audioPanel = findChild<QWidget *>("audioOnlySessionPanel"))
     audioPanel->setVisible(audioOnly);
   if (auto *displayTools = findChild<QWidget *>("displaySessionTools"))
-    displayTools->setVisible(!audioOnly);
+    displayTools->setVisible(!audioOnly && !otg);
   if (auto *feedback = findChild<QLabel *>("audioOnlySessionFeedback")) {
     feedback->setText(
         !audioOnly ? "Waiting to start audio."
@@ -2176,8 +2313,8 @@ void Window::updateActions() {
   for (const auto *name : {"sessionAppLaunchCard", "sessionInstallCard",
                            "mirrorShortcutsCard", "sessionDisplayHint"})
     if (auto *widget = findChild<QWidget *>(name))
-      widget->setVisible(!audioOnly);
-  screenshotButton->setVisible(!audioOnly);
+      widget->setVisible(!audioOnly && !otg);
+  screenshotButton->setVisible(!audioOnly && !otg);
   if (state == "unauthorized")
     deviceHelp->setText("Unlock your phone and accept the USB debugging "
                         "prompt. Devices refresh automatically.");
@@ -2209,7 +2346,11 @@ void Window::updateActions() {
              "session.";
   } else {
     detail = engine.sessionStateText() + " · " + engine.activeSerial;
-    if (audioOnly) {
+    if (otg) {
+      detail += "\n\nUSB control only: no video, audio, recording or ADB "
+                "device tools. Focus the separate control window to send "
+                "the enabled physical inputs.";
+    } else if (audioOnly) {
       detail += "\n\nAudio-only mode does not open a mirror window or "
                 "Android control channel. ";
       detail +=
