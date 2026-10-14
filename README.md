@@ -3,7 +3,7 @@
 source for the project. Do not download releases from random websites, even if
 their name contains `scrcpy`.**
 
-# scrcpy (v4.1)
+# scrcpy (v5.0.1)
 
 ## DroidCast Desktop (fork development)
 

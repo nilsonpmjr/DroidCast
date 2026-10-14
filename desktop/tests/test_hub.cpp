@@ -1632,6 +1632,7 @@ private slots:
     QFile::remove(argumentLog);
     qputenv("HUB_ENV_LOG", argumentLog.toUtf8());
     qputenv("ADB_SERVER_SOCKET", "tcp:inherited.example:5037");
+    qputenv("ANDROID_SERIAL", "inherited-usb-target");
     Engine engine;
     engine.preferences = bundledPreferences();
     engine.preferences.remoteAdb = true;
@@ -1687,8 +1688,11 @@ private slots:
     QTRY_VERIFY_WITH_TIMEOUT(!engine.running(), 5000);
     QCOMPARE(engine.sessionState(), Engine::SessionState::Failed);
     QVERIFY(messages.last().first().toString().contains("readiness"));
+    QVERIFY(log.open(QIODevice::ReadOnly));
+    QVERIFY(!log.readAll().contains("ANDROID_SERIAL="));
     qunsetenv("HUB_ENV_LOG");
     qunsetenv("ADB_SERVER_SOCKET");
+    qunsetenv("ANDROID_SERIAL");
   }
   void otgDeviceInspectionUsesTheLocalForkOnly() {
     Engine engine;

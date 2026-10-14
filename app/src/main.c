@@ -84,10 +84,6 @@ main_scrcpy(int argc, char *argv[]) {
     }
 #endif
 
-#ifdef SCRCPY_LAVF_REQUIRES_REGISTER_ALL
-    av_register_all();
-#endif
-
 #ifdef HAVE_V4L2
     if (args.opts.v4l2_device) {
         avdevice_register_all();

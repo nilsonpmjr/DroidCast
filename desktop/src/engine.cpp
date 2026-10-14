@@ -2060,6 +2060,9 @@ bool Engine::startOtg(const QString &serial, bool keyboard, bool mouse,
   // OTG is a local libusb session. In particular, its optional Windows ADB
   // shutdown must never target a configured or inherited remote ADB server.
   env.remove("ADB_SERVER_SOCKET");
+  // USB selection belongs to the UI, including its automatic single-device
+  // choice. Upstream CLI defaults must not select an inherited shell target.
+  env.remove("ANDROID_SERIAL");
   env.insert("DROIDCAST_SESSION_TOKEN", QString::fromLatin1(sessionToken));
   mirror.setProcessEnvironment(env);
   QStringList args{"--otg",

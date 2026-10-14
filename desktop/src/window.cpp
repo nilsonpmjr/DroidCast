@@ -2160,7 +2160,7 @@ void Window::savePreferences() {
   const bool ready = !executablePath(engine.preferences.adb).isEmpty() &&
                      !executablePath(engine.preferences.scrcpy).isEmpty() &&
                      QFileInfo::exists(engine.preferences.server);
-  runtimeStatus->setText(ready ? "Bundled services ready\nscrcpy 4.1"
+  runtimeStatus->setText(ready ? "Bundled services ready\nscrcpy 5.0.1"
                                : "Bundle incomplete\nSee Diagnostics");
 }
 void Window::updateDevices() {

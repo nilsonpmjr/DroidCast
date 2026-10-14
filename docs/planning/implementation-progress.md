@@ -656,3 +656,32 @@ device compatibility testing remain open.
   workspace cases passed after the route/early-close checks were added (36.87 s).
 - Hardware unplug/reconnect, latency, and Windows/Linux validation remain open.
   This changes discovery in the existing workspace, not the compact UI release gate.
+
+## Part 33: upstream scrcpy 5.0.1 integration (2026-10-14)
+
+- Preserved all local work in `b616d341` before merging upstream master
+  `a60891aea193d92e7e5c3942700eca63f9d19a5f` (70 new upstream commits).
+  The compact prototype and approved planning are now tracked; macOS `.DS_Store`
+  metadata is ignored rather than excluding the planning directory.
+- Integrated upstream hardware decoding, threaded decoders, video buffering,
+  recorder leak fixes, input and Android camera/audio fixes. Resolved conflicts
+  in main/demuxer while retaining local USB listing and audio packet readiness.
+  The private bridge, renderer commands and recorder finalization path remain.
+- First audio readiness explicitly requires `SC_SINK_OK` under the new tri-state
+  sink API. A real-demuxer regression test covers config-only streams, multiple
+  accepted media packets, rejected packets and stopped sinks without a phone.
+- Updated all four platform runtime pins/hashes and displayed engine version to
+  5.0.1. The staged Android server matches the release and engine build byte for
+  byte. Desktop OTG strips inherited `ANDROID_SERIAL` so upstream's new CLI
+  fallback cannot replace the UI's explicit/automatic-single-device selection.
+- macOS source engine build, all 14 debug C tests, both compact Qt suites and the
+  real five-second ADB event probe passed. The probe observed one empty snapshot;
+  no phone was attached. Offscreen desktop startup showed bundled 5.0.1 ready.
+- The complete desktop `hub-tests` suite passed against the integrated source
+  (154.42 s), including OTG environment isolation, lifecycle and recording cases.
+  Compact suites passed in 18.85 s. Verified build artifacts are under
+  `build-upstream`; the existing `build-prototype` app now stages that 5.0.1 runtime.
+- FFmpeg 6.0+ is now required; Linux VA-API requires libdrm headers. New hardware
+  decoding retains upstream Auto behavior; no new desktop selector is claimed.
+  Physical mirroring/playable recordings and Windows/Linux builds remain release
+  proof rather than inferred from successful macOS automated tests.

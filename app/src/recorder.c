@@ -22,16 +22,10 @@ static const AVRational SCRCPY_TIME_BASE = {1, 1000000}; // timestamps in us
 
 static const AVOutputFormat *
 find_muxer(const char *name) {
-#ifdef SCRCPY_LAVF_HAS_NEW_MUXER_ITERATOR_API
     void *opaque = NULL;
-#endif
     const AVOutputFormat *oformat = NULL;
     do {
-#ifdef SCRCPY_LAVF_HAS_NEW_MUXER_ITERATOR_API
         oformat = av_muxer_iterate(&opaque);
-#else
-        oformat = av_oformat_next(oformat);
-#endif
         // until null or containing the requested name
     } while (oformat && !sc_str_list_contains(oformat->name, ',', name));
     return oformat;
@@ -46,6 +40,7 @@ sc_recorder_packet_ref(const AVPacket *packet) {
     }
 
     if (av_packet_ref(p, packet)) {
+        LOG_OOM();
         av_packet_free(&p);
         return NULL;
     }
@@ -160,11 +155,7 @@ sc_recorder_open_output_file(struct sc_recorder *recorder) {
         return false;
     }
 
-    // contrary to the deprecated API (av_oformat_next()), av_muxer_iterate()
-    // returns (on purpose) a pointer-to-const, but AVFormatContext.oformat
-    // still expects a pointer-to-non-const (it has not be updated accordingly)
-    // <https://github.com/FFmpeg/FFmpeg/commit/0694d8702421e7aff1340038559c438b61bb30dd>
-    recorder->ctx->oformat = (AVOutputFormat *) format;
+    recorder->ctx->oformat = format;
 
     av_dict_set(&recorder->ctx->metadata, "comment",
                 "Recorded by scrcpy " SCRCPY_VERSION, 0);
@@ -488,7 +479,7 @@ run_recorder(void *data) {
     bool success = sc_recorder_record(recorder);
 
     sc_mutex_lock(&recorder->mutex);
-    // Prevent the producer to push any new packet
+    // Prevent the producer from pushing any new packet
     recorder->stopped = true;
     // Discard pending packets
     sc_recorder_queue_clear(&recorder->video_queue);
@@ -548,7 +539,7 @@ sc_recorder_set_orientation(AVStream *stream, enum sc_orientation orientation) {
 
 static bool
 sc_recorder_video_packet_sink_open(struct sc_packet_sink *sink,
-                                   AVCodecContext *ctx,
+                                   const AVCodecParameters *params,
                                    const struct sc_stream_session *session) {
     (void) session;
 
@@ -562,13 +553,13 @@ sc_recorder_video_packet_sink_open(struct sc_packet_sink *sink,
         return false;
     }
 
-    AVStream *stream = avformat_new_stream(recorder->ctx, ctx->codec);
+    AVStream *stream = avformat_new_stream(recorder->ctx, NULL);
     if (!stream) {
         sc_mutex_unlock(&recorder->mutex);
         return false;
     }
 
-    int r = avcodec_parameters_from_context(stream->codecpar, ctx);
+    int r = avcodec_parameters_copy(stream->codecpar, params);
     if (r < 0) {
         sc_mutex_unlock(&recorder->mutex);
         return false;
@@ -586,9 +577,11 @@ sc_recorder_video_packet_sink_open(struct sc_packet_sink *sink,
              sc_orientation_get_name(recorder->orientation));
     }
 
+    enum AVCodecID codec_id = params->codec_id;
+
     // A config packet is provided for all supported formats except VPx
-    recorder->video_expects_config_packet = ctx->codec_id != AV_CODEC_ID_VP8
-                                         && ctx->codec_id != AV_CODEC_ID_VP9;
+    recorder->video_expects_config_packet = codec_id != AV_CODEC_ID_VP8
+                                         && codec_id != AV_CODEC_ID_VP9;
 
     recorder->video_init = true;
     sc_cond_signal(&recorder->cond);
@@ -610,7 +603,7 @@ sc_recorder_video_packet_sink_close(struct sc_packet_sink *sink) {
     sc_mutex_unlock(&recorder->mutex);
 }
 
-static bool
+static enum sc_sink_result
 sc_recorder_video_packet_sink_push(struct sc_packet_sink *sink,
                                    const AVPacket *packet) {
     struct sc_recorder *recorder = DOWNCAST_VIDEO(sink);
@@ -622,14 +615,13 @@ sc_recorder_video_packet_sink_push(struct sc_packet_sink *sink,
     if (recorder->stopped) {
         // reject any new packet
         sc_mutex_unlock(&recorder->mutex);
-        return false;
+        return SC_SINK_STOPPED;
     }
 
     AVPacket *rec = sc_recorder_packet_ref(packet);
     if (!rec) {
-        LOG_OOM();
         sc_mutex_unlock(&recorder->mutex);
-        return false;
+        return SC_SINK_KO;
     }
 
     rec->stream_index = recorder->video_stream.index;
@@ -638,18 +630,19 @@ sc_recorder_video_packet_sink_push(struct sc_packet_sink *sink,
     if (!ok) {
         LOG_OOM();
         sc_mutex_unlock(&recorder->mutex);
-        return false;
+        av_packet_free(&rec);
+        return SC_SINK_KO;
     }
 
     sc_cond_signal(&recorder->cond);
 
     sc_mutex_unlock(&recorder->mutex);
-    return true;
+    return SC_SINK_OK;
 }
 
 static bool
 sc_recorder_audio_packet_sink_open(struct sc_packet_sink *sink,
-                                   AVCodecContext *ctx,
+                                   const AVCodecParameters *params,
                                    const struct sc_stream_session *session) {
     (void) session;
 
@@ -660,13 +653,13 @@ sc_recorder_audio_packet_sink_open(struct sc_packet_sink *sink,
 
     sc_mutex_lock(&recorder->mutex);
 
-    AVStream *stream = avformat_new_stream(recorder->ctx, ctx->codec);
+    AVStream *stream = avformat_new_stream(recorder->ctx, NULL);
     if (!stream) {
         sc_mutex_unlock(&recorder->mutex);
         return false;
     }
 
-    int r = avcodec_parameters_from_context(stream->codecpar, ctx);
+    int r = avcodec_parameters_copy(stream->codecpar, params);
     if (r < 0) {
         sc_mutex_unlock(&recorder->mutex);
         return false;
@@ -676,7 +669,7 @@ sc_recorder_audio_packet_sink_open(struct sc_packet_sink *sink,
 
     // A config packet is provided for all supported formats except raw audio
     recorder->audio_expects_config_packet =
-        ctx->codec_id != AV_CODEC_ID_PCM_S16LE;
+        params->codec_id != AV_CODEC_ID_PCM_S16LE;
 
     recorder->audio_init = true;
     sc_cond_signal(&recorder->cond);
@@ -699,7 +692,7 @@ sc_recorder_audio_packet_sink_close(struct sc_packet_sink *sink) {
     sc_mutex_unlock(&recorder->mutex);
 }
 
-static bool
+static enum sc_sink_result
 sc_recorder_audio_packet_sink_push(struct sc_packet_sink *sink,
                                    const AVPacket *packet) {
     struct sc_recorder *recorder = DOWNCAST_AUDIO(sink);
@@ -712,14 +705,13 @@ sc_recorder_audio_packet_sink_push(struct sc_packet_sink *sink,
     if (recorder->stopped) {
         // reject any new packet
         sc_mutex_unlock(&recorder->mutex);
-        return false;
+        return SC_SINK_STOPPED;
     }
 
     AVPacket *rec = sc_recorder_packet_ref(packet);
     if (!rec) {
-        LOG_OOM();
         sc_mutex_unlock(&recorder->mutex);
-        return false;
+        return SC_SINK_KO;
     }
 
     rec->stream_index = recorder->audio_stream.index;
@@ -728,13 +720,14 @@ sc_recorder_audio_packet_sink_push(struct sc_packet_sink *sink,
     if (!ok) {
         LOG_OOM();
         sc_mutex_unlock(&recorder->mutex);
-        return false;
+        av_packet_free(&rec);
+        return SC_SINK_KO;
     }
 
     sc_cond_signal(&recorder->cond);
 
     sc_mutex_unlock(&recorder->mutex);
-    return true;
+    return SC_SINK_OK;
 }
 
 static void
@@ -865,6 +858,8 @@ sc_recorder_join(struct sc_recorder *recorder) {
 
 void
 sc_recorder_destroy(struct sc_recorder *recorder) {
+    sc_vecdeque_destroy(&recorder->video_queue);
+    sc_vecdeque_destroy(&recorder->audio_queue);
     sc_cond_destroy(&recorder->cond);
     sc_mutex_destroy(&recorder->mutex);
     free(recorder->filename);

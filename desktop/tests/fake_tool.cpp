@@ -56,6 +56,8 @@ int main(int argc, char **argv) {
       QTextStream stream(&log);
       stream << args.mid(1).join('|') << '\t'
              << qEnvironmentVariable("ADB_SERVER_SOCKET") << '\n';
+      if (qEnvironmentVariableIsSet("ANDROID_SERIAL"))
+        stream << "ANDROID_SERIAL=" << qEnvironmentVariable("ANDROID_SERIAL") << '\n';
     }
   }
   if (mode == "hang")

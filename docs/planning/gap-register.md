@@ -47,6 +47,12 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 
 ## Current checkpoint
 
+Upstream source and bundled dependencies now track scrcpy 5.0.1 (`a60891ae`).
+The private DroidCast bridge and both Qt interfaces are retained. New hardware
+decoding uses the upstream Auto default; a dedicated desktop `--hwdec` setting
+is not implemented yet. Physical mirroring/recording must be revalidated against
+this version, along with the existing platform release checks.
+
 | Area | Status | What works now | Gap to close |
 | --- | --- | --- | --- |
 | Bundled runtime | Partial | The forked client, ADB and matching server are launched without executable pickers. | Clean-machine packages, signing and Windows/macOS verification. |

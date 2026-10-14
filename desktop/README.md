@@ -13,7 +13,8 @@ mirroring; there is no executable picker or separate scrcpy installation step.
 Developer prerequisites: C++17 compiler, CMake 3.21+, Qt 6.4+ Widgets and Test,
 Meson, Ninja, and the scrcpy client development dependencies from
 [the build documentation](../doc/build.md). On this Linux checkout those include
-SDL3, FFmpeg (avcodec, avformat, avutil, swresample), and libusb.
+SDL3, FFmpeg 6.0 or newer (avcodec, avformat, avutil, swresample), libusb,
+and libdrm headers for Linux VA-API support.
 
 ```sh
 cmake -S desktop -B build-droidcast -G Ninja -DCMAKE_BUILD_TYPE=Release
@@ -22,14 +23,14 @@ ctest --test-dir build-droidcast --output-on-failure
 ./build-droidcast/droidcast-desktop
 ```
 
-CMake downloads the pinned scrcpy 4.1 platform archive and verifies SHA-256
+CMake downloads the pinned scrcpy 5.0.1 platform archive and verifies SHA-256
 against the checksums already recorded in this repository. It takes ADB, the
 matching prebuilt Android server and supporting resources from that archive,
 builds the C client **from this checkout**, and places everything in `runtime/`
 beside DroidCast. The application performs no downloads at launch. The first
 configure needs internet; verified archives are reused from `build-droidcast/downloads`.
 
-The prebuilt server is appropriate for the current, unmodified Java server. If
+The prebuilt server matches the current upstream 5.0.1 Java server. If
 you change the server/protocol, build and stage a matching server too; do not mix
 different client/server versions. The Gradle server build is not yet integrated
 into the desktop build.
@@ -37,7 +38,7 @@ into the desktop build.
 The build understands Linux x86_64, Windows x64, and macOS x86_64/arm64 runtime
 archives. Qt and engine development dependencies must be available on the build
 machine. For UI-only development, `-DDROIDCAST_BUILD_FORK=OFF` uses the verified
-upstream 4.1 engine from the bundle, without first-frame reporting or the private
+upstream 5.0.1 engine from the bundle, without first-frame reporting or the private
 graceful-stop protocol; it is not suitable for release. `-DDROIDCAST_BUNDLE_RUNTIME=OFF` is for isolated
 tests only; that build is not a distributable app. `-DBUILD_TESTING=OFF` omits Qt Test.
 
