@@ -61,6 +61,11 @@ Windows/macOS build paths have not yet been exercised.
 - **Connected devices:** illustrated first-connection guidance, automatic ADB
   discovery, device cards, authorization/USB-permission states, explicit device
   selection, quick session preferences, mirror and record actions.
+  Discovery uses one persistent `adb track-devices -l` client while the app is
+  open. Scan devices explicitly restarts that subscription; idle discovery runs
+  no periodic device queries. Failures clear device actions and reconnect with
+  bounded backoff. The observer pauses for OTG, follows the selected ADB route,
+  and stops when the app closes without shutting down the shared ADB server.
 - **Active session:** media-backed lifecycle state, elapsed process time,
   selected phone, recording destination, screenshot capture, APK installation,
   Back/Home/Recents/Power/volume toolbar and graceful stop. The live video opens in
@@ -202,8 +207,8 @@ artwork: the iMac variant for desktop hosts and the MacBook variant when a lapto
 can be identified from host power/model information. Unknown form factors safely
 fall back to Desktop. The original TS project remains untouched.
 
-Next: add fork-owned libusb enumeration to the OTG picker; validate remote ADB/SSH
-tunnel, display, virtual-display, Android actions, audio recordings,
+Next: improve OTG multi-device recovery; validate remote ADB/SSH tunnel, display,
+virtual-display, Android actions, audio recordings,
 clipboard, measured FPS, live app launch and camera sessions with physical devices;
 prototype embedded video before deciding its release scope; add per-device profiles
 and concurrent sessions; then finish standalone platform installers.

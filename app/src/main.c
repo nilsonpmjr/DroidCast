@@ -13,6 +13,7 @@
 #include "scrcpy.h"
 #ifdef HAVE_USB
 # include "usb/scrcpy_otg.h"
+# include "usb/usb.h"
 #endif
 #include "util/log.h"
 #include "util/net.h"
@@ -75,6 +76,13 @@ main_scrcpy(int argc, char *argv[]) {
         ret = SCRCPY_EXIT_SUCCESS;
         goto end;
     }
+
+#ifdef HAVE_USB
+    if (args.opts.list_usb_devices) {
+        ret = sc_usb_list_devices() ? SCRCPY_EXIT_SUCCESS : SCRCPY_EXIT_FAILURE;
+        goto end;
+    }
+#endif
 
 #ifdef SCRCPY_LAVF_REQUIRES_REGISTER_ALL
     av_register_all();

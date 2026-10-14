@@ -53,6 +53,7 @@ enum {
     OPT_RAW_KEY_EVENTS,
     OPT_NO_DOWNSIZE_ON_ERROR,
     OPT_OTG,
+    OPT_LIST_USB_DEVICES,
     OPT_NO_CLEANUP,
     OPT_PRINT_FPS,
     OPT_NO_POWER_ON,
@@ -728,6 +729,12 @@ static const struct sc_option options[] = {
                 "--keyboard=disabled and --mouse=disabled.\n"
                 "It may only work over USB.\n"
                 "See --keyboard, --mouse and --gamepad.",
+    },
+    {
+        .longopt_id = OPT_LIST_USB_DEVICES,
+        .longopt = "list-usb-devices",
+        .text = "List locally accessible USB devices eligible for OTG control.\n"
+                "This does not use adb or start mirroring.",
     },
     {
         .shortopt = 'p',
@@ -2771,6 +2778,14 @@ parse_args_with_getopt(struct scrcpy_cli_args *args, int argc, char *argv[],
                 break;
 #else
                 LOGE("OTG mode (--otg) is disabled.");
+                return false;
+#endif
+            case OPT_LIST_USB_DEVICES:
+#ifdef HAVE_USB
+                opts->list_usb_devices = true;
+                break;
+#else
+                LOGE("USB device listing (--list-usb-devices) is disabled.");
                 return false;
 #endif
             case OPT_V4L2_SINK:

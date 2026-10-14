@@ -24,7 +24,7 @@ protected:
 private:
   QSettings settings;
   Engine engine;
-  QTimer poll, sessionClock;
+  QTimer sessionClock;
   QElapsedTimer elapsed;
   QListWidget *navigation, *deviceList, *captureList;
   QStackedWidget *pages;
@@ -41,14 +41,14 @@ private:
   QCheckBox *otgKeyboardToggle, *otgMouseToggle, *otgGamepadToggle;
   QLabel *otgStatus;
   QPlainTextEdit *logs;
-  QComboBox *captureFilter,
+  QComboBox *captureFilter, *otgDeviceSelector = nullptr,
       *mouseModeSelector = nullptr, *sessionAppSelector = nullptr,
       *cameraIdSelector = nullptr, *cameraSizeSelector = nullptr,
       *cameraFpsSelector = nullptr, *displaySelector = nullptr,
       *videoEncoderSelector = nullptr, *audioEncoderSelector = nullptr,
       *appSelector = nullptr;
-  QString fingerprint, cameraCapabilitySerial, deviceCapabilitySerial,
-      appCapabilitySerial, pendingPushPath;
+  QString fingerprint, lastSelectedSerial, cameraCapabilitySerial,
+      deviceCapabilitySerial, appCapabilitySerial, pendingPushPath;
   QList<CameraCapability> cameraCapabilities;
   QList<DisplayCapability> displayCapabilities;
   QList<VideoEncoderCapability> videoEncoderCapabilities;
@@ -64,6 +64,7 @@ private:
   QWidget *diagnosticsPage();
   void updateDevices();
   void updateActions();
+  void finishClose();
   void updateCaptures();
   void savePreferences();
   void setCameraCapabilities(const QString &serial, const QString &report);

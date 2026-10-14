@@ -1,5 +1,10 @@
 # DroidCast: scrcpy configuration and live-control coverage
 
+Planning note (2026-10-13): [the approved compact-interface plan](compact-desktop-spec.md)
+supersedes permanent navigation and toolbar placement decisions. Preserve this functional
+inventory; destinations below are historical mappings to migrate, not a requirement
+to retain seven pages. See [the reconciliation](compact-desktop-tickets-draft.md).
+
 Status: planning inventory, not a claim that these controls are implemented.
 Source of truth: the checked-out scrcpy 4.1 CLI definitions, control-message types
 and the sixteen documentation topics shown in the user's screenshot.

@@ -1,5 +1,11 @@
 # DroidCast Desktop: proposed delivery tickets
 
+Planning note (2026-10-13): [the new ticket draft](compact-desktop-tickets-draft.md)
+cross-references tickets 1–26 rather than duplicating their implementations. Preserve
+the acceptance criteria below, subject to the approved compact-interface plan and
+verified implementation progress. The new tickets are approved and formalized in
+the [local tracker](README.md); external issues have not been published.
+
 Status: implementation authorized in incremental parts. These are not published GitHub issues.
 Prepared using the installed `to-tickets` skill from the accompanying specification.
 Numbers below are draft identifiers, not GitHub issue numbers.
@@ -143,7 +149,7 @@ these broader tickets complete.
     - **Verification:** Real camera capture, camera selection and supported live controls; high-speed and unsupported-mode tests use capability-specific evidence.
 
 22. **Control a phone over USB OTG without ADB**
-    - **Status:** Partial; control-only lifecycle and manual/automatic single-device selection are implemented, while UI enumeration and hardware proof remain.
+    - **Status:** Partial; control-only lifecycle and the fork-owned USB picker are implemented in local changes (Part 26); multi-device recovery and hardware proof remain.
     - **Blocked by:** 13, category routes.
     - **What it delivers:** Discover/select an eligible USB device and start an OTG keyboard/mouse/gamepad session without requiring USB debugging.
     - **Acceptance:** Do not use the ADB-authorized-device gate; label the mode as control-only with no audio/video; expose transport/driver restrictions; stop and reconnect recover cleanly.

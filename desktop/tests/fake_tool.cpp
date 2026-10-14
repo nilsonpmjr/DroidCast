@@ -60,6 +60,39 @@ int main(int argc, char **argv) {
   }
   if (mode == "hang")
     return app.exec();
+  if (args.contains("track-devices")) {
+    auto frame = [](const QByteArray &payload) {
+      return QByteArray::number(payload.size(), 16).rightJustified(4, '0') + payload;
+    };
+    auto write = [&](const QByteArray &bytes) {
+      out << QString::fromLatin1(bytes); out.flush();
+    };
+    const QByteArray phone = "PHONE123\tdevice usb:1-1 model:Pixel_Test transport_id:1\n";
+    if (mode == "monitor-malformed") { write("ZZZZ"); return app.exec(); }
+    if (mode == "monitor-truncated") { write("001"); return 1; }
+    if (mode == "monitor-fail") return 1;
+    if (mode == "monitor-fragments") {
+      const auto packet = frame(phone);
+      write(packet.left(2));
+      QTimer::singleShot(20, &app, [&, packet] { write(packet.mid(2, 7)); });
+      QTimer::singleShot(40, &app, [&, packet] { write(packet.mid(9) + frame({}) + frame(phone)); });
+    } else if (mode == "monitor-events") {
+      write(frame({}));
+      QTimer::singleShot(100, &app, [&] { write(frame("NEW\tunauthorized usb:1-2\n")); });
+      QTimer::singleShot(200, &app, [&] { write(frame("NEW\tdevice usb:1-2 model:Phone\n")); });
+    } else {
+      write(frame(phone + "LOCKED\tunauthorized usb:1-2\n"));
+      if (mode == "monitor-disconnect") QTimer::singleShot(100, &app, [&] { app.exit(1); });
+    }
+    return app.exec();
+  }
+  if (args.contains("--list-usb-devices")) {
+    if (mode == "otg-inspect-fail")
+      return 1;
+    out << "DROIDCAST_USB/1 USB-OTG-123\t18d1:4ee7\tGoogle\tPixel\n"
+           "DROIDCAST_USB/1 USB-OTG-456\t1234:abcd\tExample\tPhone\n";
+    return 0;
+  }
   if (args.contains("--list-displays")) {
     if (mode == "inspect-hang")
       return app.exec();

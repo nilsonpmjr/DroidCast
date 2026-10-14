@@ -196,6 +196,7 @@ Window::Window(QWidget *parent) : QMainWindow(parent) {
     updateActions();
   });
   connect(&engine, &Engine::wirelessChanged, this, &Window::updateActions);
+  connect(&engine, &Engine::deviceMonitoringChanged, this, &Window::finishClose);
   connect(&engine, &Engine::sessionChanged, this, [this] {
     if (engine.running() && !elapsed.isValid())
       elapsed.start();
@@ -207,17 +208,10 @@ Window::Window(QWidget *parent) : QMainWindow(parent) {
         engine.sessionState() == Engine::SessionState::Starting)
       updateAppSelector();
     updateActions();
-    if (closing && !engine.running())
-      QTimer::singleShot(0, this, &QWidget::close);
+    finishClose();
   });
   connect(&engine, &Engine::deviceTaskChanged, this, &Window::updateActions);
   connect(&engine, &Engine::captureSaved, this, [this] { updateCaptures(); });
-  connect(&poll, &QTimer::timeout, this, [this] {
-    if (!closing && !engine.otgSession() &&
-        !executablePath(engine.preferences.adb).isEmpty())
-      engine.refresh();
-  });
-  poll.start(4000);
   connect(&sessionClock, &QTimer::timeout, this, [this] {
     auto seconds = elapsed.isValid() ? elapsed.elapsed() / 1000 : 0;
     sessionTime->setText(QString("%1:%2")
@@ -228,7 +222,10 @@ Window::Window(QWidget *parent) : QMainWindow(parent) {
   savePreferences();
   updateDevices();
   updateCaptures();
-  QTimer::singleShot(0, &engine, &Engine::refresh);
+  QTimer::singleShot(0, this, [this] {
+    if (!closing)
+      engine.startDeviceMonitoring();
+  });
 }
 
 Window::~Window() {
@@ -236,6 +233,7 @@ Window::~Window() {
   // signals. Window data members are destroyed before engine, so disconnect
   // while every slot dependency is still alive.
   disconnect(&engine, nullptr, this, nullptr);
+  engine.stopDeviceMonitoring();
 }
 
 void Window::showPage(int index) {
@@ -1097,6 +1095,10 @@ QWidget *Window::inputPage() {
   otg->addLayout(otgInputs);
 
   auto *serialForm = new QFormLayout;
+  otgDeviceSelector = new QComboBox;
+  otgDeviceSelector->setObjectName("otgDeviceSelector");
+  otgDeviceSelector->addItem("Manual serial or automatic selection", "");
+  field(serialForm, "Eligible USB device", otgDeviceSelector);
   otgSerialInput = new QLineEdit(engine.preferences.otgSerial);
   otgSerialInput->setObjectName("otgSerial");
   otgSerialInput->setPlaceholderText(
@@ -1104,6 +1106,9 @@ QWidget *Window::inputPage() {
   otgSerialInput->setMaxLength(256);
   field(serialForm, "USB serial (optional)", otgSerialInput);
   otg->addLayout(serialForm);
+  auto *refreshOtg =
+      button("Refresh USB devices", "refresh", "refreshOtgDevices");
+  otg->addWidget(refreshOtg, 0, Qt::AlignLeft);
 #ifdef Q_OS_WIN
   otg->addWidget(label(
       "Windows releases ADB before opening the device because both cannot "
@@ -1136,6 +1141,38 @@ QWidget *Window::inputPage() {
     updateActions();
   };
   connect(otgSerialInput, &QLineEdit::textChanged, this, persistOtg);
+  connect(otgDeviceSelector, qOverload<int>(&QComboBox::currentIndexChanged),
+          this, [this](int) {
+            const auto serial = otgDeviceSelector->currentData().toString();
+            if (!serial.isEmpty())
+              otgSerialInput->setText(serial);
+          });
+  connect(refreshOtg, &QPushButton::clicked, &engine,
+          &Engine::inspectOtgDevices);
+  connect(&engine, &Engine::otgDevicesChanged, this,
+          [this, refreshOtg] {
+            const auto current = otgSerialInput->text();
+            otgDeviceSelector->blockSignals(true);
+            otgDeviceSelector->clear();
+            otgDeviceSelector->addItem("Manual serial or automatic selection",
+                                       "");
+            for (const auto &device : engine.otgDevices) {
+              const auto name =
+                  (device.manufacturer + " " + device.product).trimmed();
+              otgDeviceSelector->addItem(
+                  QString("%1 · %2%3")
+                      .arg(device.serial, device.vendorProduct,
+                           name.isEmpty() ? QString() : " · " + name),
+                  device.serial);
+            }
+            const auto index = otgDeviceSelector->findData(current);
+            otgDeviceSelector->setCurrentIndex(index < 0 ? 0 : index);
+            otgDeviceSelector->blockSignals(false);
+            refreshOtg->setEnabled(!engine.running() && !engine.inspectingOtg());
+            refreshOtg->setText(engine.inspectingOtg() ? "Scanning USB…"
+                                                        : "Refresh USB devices");
+            updateActions();
+          });
   for (auto *control :
        {otgKeyboardToggle, otgMouseToggle, otgGamepadToggle})
     connect(control, &QCheckBox::toggled, this, persistOtg);
@@ -2133,6 +2170,8 @@ void Window::updateDevices() {
   if (currentFingerprint != fingerprint ||
       deviceList->count() != engine.devices.size()) {
     const auto selected = selectedSerial();
+    if (!selected.isEmpty())
+      lastSelectedSerial = selected;
     QSignalBlocker blocker(deviceList);
     deviceList->clear();
     for (const auto &d : engine.devices) {
@@ -2172,7 +2211,7 @@ void Window::updateDevices() {
                                      .filePath(captureName(".png")));
       });
       deviceList->setItemWidget(item, deviceCard);
-      if (d.serial == selected)
+      if (d.serial == lastSelectedSerial)
         deviceList->setCurrentItem(item);
     }
     if (!deviceList->currentItem() && deviceList->count())
@@ -2492,11 +2531,19 @@ void Window::closeEvent(QCloseEvent *event) {
       event->ignore();
       return;
     }
-    closing = true;
-    poll.stop();
+  }
+  closing = true;
+  engine.stopDeviceMonitoring();
+  if (engine.running())
     engine.stop();
+  if (engine.running() || engine.deviceMonitorRunning()) {
     event->ignore();
     return;
   }
   event->accept();
+}
+
+void Window::finishClose() {
+  if (closing && !engine.running() && !engine.deviceMonitorRunning())
+    QTimer::singleShot(0, this, &QWidget::close);
 }

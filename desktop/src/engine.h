@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QMap>
+#include <QElapsedTimer>
 #include <QObject>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -49,6 +50,10 @@ struct AppCapability {
   bool system;
 };
 QList<AppCapability> parseAppCapabilities(const QString &output);
+struct OtgDevice {
+  QString serial, vendorProduct, manufacturer, product;
+};
+QList<OtgDevice> parseOtgDevices(const QString &output);
 
 struct Preferences {
   QString adb = "adb", scrcpy = "scrcpy", server;
@@ -91,6 +96,7 @@ public:
   ~Engine() override;
   Preferences preferences;
   QList<Device> devices;
+  QList<OtgDevice> otgDevices;
   QString activeSerial, activeRecording;
   bool deviceBusy() const {
     return deviceTask.state() != QProcess::NotRunning || inspecting();
@@ -166,9 +172,17 @@ public:
   bool running() const { return mirror.state() != QProcess::NotRunning; }
   bool wirelessBusy() const { return wireless.state() != QProcess::NotRunning; }
   void refresh();
+  void startDeviceMonitoring();
+  void stopDeviceMonitoring();
+  bool deviceMonitoring() const { return monitorEnabled; }
+  bool deviceMonitorRunning() const { return deviceMonitor.state() != QProcess::NotRunning; }
   bool inspecting() const { return inspector.state() != QProcess::NotRunning; }
+  bool inspectingOtg() const {
+    return usbInspector.state() != QProcess::NotRunning;
+  }
   void inspectDevice(const QString &serial);
   void cancelInspection();
+  void inspectOtgDevices();
   bool start(const QString &serial, const QString &recording = {});
   bool startOtg(const QString &serial, bool keyboard, bool mouse,
                 bool gamepad);
@@ -178,7 +192,12 @@ signals:
   void devicesChanged();
   void sessionChanged();
   void scanChanged();
+  // A failed scan must not be interpreted as a physical USB disconnect.
+  void deviceScanCompleted(bool success);
+  void deviceMonitoringReset();
+  void deviceMonitoringChanged();
   void inspectionChanged();
+  void otgDevicesChanged();
   void inspectionResult(const QString &serial, const QString &output);
   void wirelessChanged();
   void deviceTaskChanged();
@@ -201,11 +220,26 @@ signals:
 
 private:
   QProcess scan, mirror, wireless, deviceTask;
-  QProcess inspector;
+  QProcess inspector, usbInspector;
+  QProcess deviceMonitor;
+  QTimer monitorRetry, monitorStartupTimeout, monitorStopTimeout;
+  QByteArray monitorOutput;
+  bool monitorEnabled = false, monitorHealthy = false, monitorFailed = false,
+       monitorRestart = false, monitorRecoveryPending = false;
+  int monitorRetryDelay = 1000;
+  QString monitorSocket;
+  QElapsedTimer monitorUptime;
+  void launchDeviceMonitor();
+  void restartDeviceMonitor();
+  void readDeviceMonitor();
+  void failDeviceMonitor(const QString &reason);
+  void scheduleMonitorRetry();
   QTimer inspectionTimeout;
   QByteArray inspectionOutput;
   QString inspectionSerial;
   bool inspectionAborted = false;
+  QTimer otgInspectionTimeout;
+  QByteArray otgInspectionOutput;
   QTimer scanTimeout, wirelessTimeout, stopTimeout, deviceTimeout,
       audioCapabilityTimeout, otgCapabilityTimeout;
   QByteArray deviceOutput;

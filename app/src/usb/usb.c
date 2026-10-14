@@ -1,6 +1,7 @@
 #include "usb.h"
 
 #include <assert.h>
+#include <stdio.h>
 
 #include "util/log.h"
 #include "util/vector.h"
@@ -102,7 +103,8 @@ sc_usb_devices_destroy(struct sc_vec_usb_devices *usb_devices) {
 }
 
 static bool
-sc_usb_list_devices(struct sc_usb *usb, struct sc_vec_usb_devices *out_vec) {
+sc_usb_enumerate_devices(struct sc_usb *usb,
+                         struct sc_vec_usb_devices *out_vec) {
     libusb_device **list;
     ssize_t count = libusb_get_device_list(usb->context, &list);
     if (count < 0) {
@@ -173,7 +175,7 @@ bool
 sc_usb_select_device(struct sc_usb *usb, const char *serial,
                      struct sc_usb_device *out_device) {
     struct sc_vec_usb_devices vec = SC_VECTOR_INITIALIZER;
-    bool ok = sc_usb_list_devices(usb, &vec);
+    bool ok = sc_usb_enumerate_devices(usb, &vec);
     if (!ok) {
         LOGE("Could not list USB devices");
         return false;
@@ -220,6 +222,45 @@ sc_usb_select_device(struct sc_usb *usb, const char *serial,
     sc_usb_device_move(out_device, device);
     sc_usb_devices_destroy(&vec);
     return true;
+}
+
+static void
+sc_usb_print_field(const char *value) {
+    if (!value) {
+        return;
+    }
+    for (const unsigned char *p = (const unsigned char *) value; *p; ++p) {
+        // Keep records one-line and tab-separated even for hostile descriptors.
+        putchar(*p < 0x20 || *p == 0x7f ? ' ' : *p);
+    }
+}
+
+bool
+sc_usb_list_devices(void) {
+    struct sc_usb usb;
+    if (!sc_usb_init(&usb)) {
+        LOGE("Could not initialize USB device listing");
+        return false;
+    }
+
+    struct sc_vec_usb_devices vec = SC_VECTOR_INITIALIZER;
+    bool ok = sc_usb_enumerate_devices(&usb, &vec);
+    if (ok) {
+        for (size_t i = 0; i < vec.size; ++i) {
+            const struct sc_usb_device *d = &vec.data[i];
+            printf("DROIDCAST_USB/1 ");
+            sc_usb_print_field(d->serial);
+            printf("\t%04x:%04x\t", (unsigned) d->vid, (unsigned) d->pid);
+            sc_usb_print_field(d->manufacturer);
+            putchar('\t');
+            sc_usb_print_field(d->product);
+            putchar('\n');
+        }
+        fflush(stdout);
+    }
+    sc_usb_devices_destroy(&vec);
+    sc_usb_destroy(&usb);
+    return ok;
 }
 
 bool

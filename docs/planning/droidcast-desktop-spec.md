@@ -1,5 +1,11 @@
 # DroidCast Desktop: complete desktop workspace
 
+Planning note (2026-10-13): the user requested a simpler interface while retaining
+scrcpy breadth. [The approved compact-interface plan](compact-desktop-spec.md) supersedes
+the seven-destination/sidebar decisions below; it does not remove functional scope.
+[The reconciliation](compact-desktop-tickets-draft.md) preserves outstanding work.
+These earlier visual decisions are historical; the new plan is approved and tracked locally.
+
 Status: draft for review, not published to the issue tracker.
 
 Baseline: `82db2c67`, the approved native interface and bundled-engine implementation.

@@ -63,6 +63,11 @@ sc_usb_init(struct sc_usb *usb);
 void
 sc_usb_destroy(struct sc_usb *usb);
 
+// Print locally accessible USB devices for a frontend. This does not start AOA
+// or adb; it only reads descriptors from devices libusb can open.
+bool
+sc_usb_list_devices(void);
+
 bool
 sc_usb_select_device(struct sc_usb *usb, const char *serial,
                      struct sc_usb_device *out_device);

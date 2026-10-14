@@ -512,3 +512,147 @@ device compatibility testing remain open.
 - Added argument, validation, persistence, no-ADB-device, lifecycle, UI context and
   920×680 tests. Real AOA input, multi-device selection, driver failures and reconnect
   behavior remain hardware proof in the gap register.
+
+## Part 26: inspected OTG USB device picker
+
+- Added fork-owned `--list-usb-devices`, which uses libusb descriptor reads only:
+  it does not invoke ADB, start AOA, mirror media or change system permissions.
+- The OTG workspace can refresh eligible locally accessible devices and selects an
+  exact serial from the results. Manual serial entry and safe automatic single-device
+  selection remain available when enumeration is incomplete.
+- Enumeration is bounded and isolated from a running session. Empty results and
+  permission failures keep the existing corrective guidance rather than treating ADB
+  devices as OTG candidates.
+- Automated coverage verifies the stable native report parser, malformed records,
+  selector population and selected-serial launch. Hardware/device-driver validation
+  remains required.
+
+## Part 27: isolated compact-interface prototype (N01, in progress)
+
+- Added a standalone Qt Widgets prototype target, without linking the production
+  engine or modifying its existing workspace. Uses system styling and native menu roles.
+- Demonstrates device/mode selection, explicitly simulated USB arrival and authorization,
+  a dismissible action offer, session state, settings and an optional tray menu.
+- Transfer opens a file picker and destination preview only; no bytes are sent. Login
+  integration is labelled planned and disabled; no preferences or autostart are written.
+- Repeated discovery does not reopen dismissed offers; reconnect does unless suppressed.
+  Authorization updates the existing offer, unplug invalidates actions and target changes
+  clear the pending connection. Mode/device remain fixed for a simulated session.
+- Background is opt-in and requires an available tray; simulated tray loss restores
+  the window. Native tray interaction and SDL focus are not proven by offscreen checks.
+- Verification: macOS Debug build, five Qt Test behavioral cases plus setup/cleanup,
+  and a reviewed offscreen screenshot. Production behavior and real USB/SDL are unchanged.
+- N01 remains in progress: interactive native review, actual SDL focus/access evidence
+  and applicable Windows/Linux comparison remain required before N02 migration.
+
+## Part 28: real-engine compact pilot (partial N02/N03)
+
+- User explicitly requested proceeding from simulated review to actual mirroring.
+  Added a separate compact live window using the existing Engine controller unchanged;
+  the original workspace remains available. Default launch is live; `--demo` is simulated.
+- Added real device discovery/authorization feedback, explicit serial-targeted launch,
+  first-frame-backed state, graceful stop and failure recovery. Adjust-window menu/button
+  share the same controller operation and capability readiness.
+- Recording launches with a chosen MKV path. PNG capture and explicit ADB file transfer
+  reuse current validation/targeting/cancellation; dialogs revalidate their target before
+  executing. Exit waits for stop/cancellation, preserving existing finalization results.
+- Development build stages the already-built fork runtime into the compact app bundle.
+  Native library deployment remains environment-dependent and belongs to N10, not solved
+  by copying runtime files. Main workspace preferences are not overwritten or migrated.
+- Added controller/helper tests for unauthorized selection, serial pinning, first-frame
+  readiness, fit availability, retry after failure and delayed close until process exit.
+  Both compact/demo test suites passed on macOS. Runtime version query succeeded.
+- ADB discovery succeeded after sandbox socket permission was granted; no Android was
+  connected. Physical mirroring, SDL focus/menus, recordings and transfer remain unproven.
+- N01/N02/N03 remain partial. Full settings, mode migration, tray, actual USB arrival
+  offers and login integration are future slices; polling is not claimed as N17 delivery.
+
+## Part 29: real tray and background pilot (partial N07/N08)
+
+- User confirmed real mirroring worked after testing the compact pilot on this macOS
+  host. Recording/playback, transfer and other-platform proof remain separate gaps.
+- Added an opt-in tray/menu-bar icon with session target/state, Qt-window restore,
+  capture, transfer, recording launch, stop and renderer actions. Menus reuse the same
+  QActions and engine validation as the compact window; no global key injection.
+- Added fullscreen, pixel-perfect, image rotation and explicit pause/resume via the
+  existing renderer bridge. Pause does not suspend Android, audio or recording.
+- Desktop preferences persist in a separate CompactPilot namespace. Close-to-background
+  only hides when explicitly enabled and tray is reported available. Losing tray
+  availability restores the window; manual launch remains visible.
+- Quit bypasses hide policy and waits for stop/cancellation. Hidden-window commands
+  revalidate target/state after dialogs; settings first restores a visible parent.
+- Added helper tests for background preserving a live session, restore, tray stop not
+  quitting, tray loss, preference round-trip and quit waiting despite background policy.
+- N07/N08 remain partial pending native tray interaction with SDL focus and real media/
+  transfer/OS proofs. USB-arrival offers and login integration N17/N18 are not implemented.
+
+## Part 30: real USB-arrival offers (partial N17, 2026-10-14)
+
+- Added a reliable scan-completion result signal to the existing controller. The compact
+  pilot uses successful local scans to maintain an initial baseline and attachment epochs;
+  failed queries do not masquerade as physical disconnects.
+- New recognized USB arrivals produce an inline offer and an explicit target submenu in
+  the optional tray. Hidden/minimized windows can receive a supported system notification;
+  clicking it only restores Qt. Discovery never selects or launches a target automatically.
+- Offers queue multiple arrivals, update authorization in place, support dismiss and
+  persisted global opt-out, and reject Wi-Fi/emulator/remote routes. Ongoing operations
+  disable offer actions rather than stopping an existing session.
+- Offer menu/buttons share targeted actions. Unplug invalidates pending choices; a
+  detected same-serial reattachment while a file dialog is open invalidates the transfer
+  attempt. File/destination choice and controller guards remain mandatory.
+- Tests passed for scan success/failure, baseline, duplicates, authorization, reconnect,
+  current-selection isolation, active sessions, multiple arrivals, opt-out, exit and
+  an accepted file choice after same-serial reconnect (no transfer).
+- This iteration reuses four-second ADB polling, not native instantaneous hotplug.
+  Brief connections between scans and Android without debugging may be missed. Physical
+  offer/notification/latency tests and platform coverage remain pending; N17 stays partial.
+- No login registration, new service, MTP browsing or automatic transfer/mirroring added.
+
+## Part 31: persistent ADB event subscription (partial N17, 2026-10-14)
+
+- User explicitly preferred events after reviewing polling resource implications.
+  The compact pilot now keeps one `adb track-devices -l` client. No timer launches
+  repeated device queries; the old workspace remains unchanged until migration.
+- Parses bounded hex4-length stdout frames, including fragmented/coalesced and empty
+  snapshots. Stderr is separate. Each complete snapshot reaches existing device and
+  offer logic, preserving authorization/attachment transitions rather than refreshing
+  a final collapsed list.
+- Startup has a bounded wait; a healthy idle subscription has no inactivity timeout.
+  Failures invalidate readiness/offers, reconnect with 1–30 second backoff, and establish
+  a fresh baseline. Repeated short-lived connections do not reset backoff prematurely.
+- Manual refresh restarts the subscription; stale one-shot responses cannot overwrite
+  newer event data. Selected serial is retained when possible. Transport environment
+  honors local/inherited isolation and active route pinning; OTG pauses and resumes events.
+- Exit stops the owned client/retry and waits for process exit alongside mirror/tasks.
+  No shared ADB shutdown, new service, automatic login or automatic phone action added.
+- Compact tests passed for framing, malformed/truncated streams, failure/recovery,
+  idle without periodic queries, stop canceling retry, event-driven offers/quit,
+  pinned/remote route and OTG pause/resume, plus previous offer/tray/session regressions.
+- Selected original workspace tests passed: scan timeout, discover/run, route pinning,
+  OTG lifecycle and recording lifecycle (five cases plus setup/cleanup).
+- Real macOS probe received an empty initial snapshot in 37 ms and stayed at one
+  snapshot during five seconds, then terminated its own client. No phone was attached.
+  Timing: 5.07 s elapsed, 0.07 s user + 0.03 s system CPU; max RSS reported 16 MiB.
+  This is a short probe including startup, not full UI/shared-server idle benchmarking.
+- Hardware plug latency, native notifications and Windows/Linux event journeys remain
+  required before completing N17. The independent tray-availability timer is not ADB polling.
+
+## Part 32: event discovery in the original workspace (2026-10-14)
+
+- Replaced the original workspace's four-second ADB polling timer with the existing
+  persistent `track-devices -l` subscription. Both interfaces now share the bounded
+  framing, startup timeout, failure backoff, route pinning and OTG pause/resume path.
+- Explicit Scan devices restarts the subscription. The selected serial survives
+  the temporary empty list and is restored if present in the next snapshot; failed
+  subscriptions clear actionable devices until a valid snapshot arrives.
+- Closing stops the owned observer and waits for its process exit alongside graceful
+  session shutdown. Closing before queued startup prevents observation from starting;
+  destruction also cancels monitoring and retries. The shared ADB server stays running.
+- Added workspace tests for one observer across idle time, explicit restart and
+  unauthorized-target selection retention, failure/recovery, early close, and local
+  → remote → local subscription environments. USB offers remain in the compact pilot.
+- Verification on macOS: rebuilt both development targets; full `hub-tests` passed
+  (183.69 s), both compact suites passed (19.80 s), and the final four focused
+  workspace cases passed after the route/early-close checks were added (36.87 s).
+- Hardware unplug/reconnect, latency, and Windows/Linux validation remain open.
+  This changes discovery in the existing workspace, not the compact UI release gate.

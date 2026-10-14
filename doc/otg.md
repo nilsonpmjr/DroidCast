@@ -43,6 +43,17 @@ scrcpy --otg -G  # short version
 
 It only works if the device is connected over USB.
 
+To list USB devices that the local libusb installation can open before choosing
+one, run:
+
+```bash
+scrcpy --list-usb-devices
+```
+
+This only reads USB descriptors. It does not use _adb_, enable AOA or start a
+control session. A listed device is a locally accessible candidate; the actual
+OTG session still verifies that it accepts Android Open Accessory input.
+
 ## OTG issues on Windows
 
 See [FAQ](/FAQ.md#otg-issues-on-windows).

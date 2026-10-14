@@ -53,6 +53,70 @@ private slots:
     qunsetenv("HUB_ENV_LOG");
     qunsetenv("ADB_SERVER_SOCKET");
   }
+  void workspaceUsesEventsAndRefreshRetainsSelection() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    const auto path = storage.filePath("workspace-events.log");
+    qputenv("HUB_ENV_LOG", path.toUtf8());
+    Window window;
+    window.show();
+    auto *devices = window.findChild<QListWidget *>("devices");
+    auto *refresh = window.findChild<QPushButton *>("refreshDevices");
+    auto *start = window.findChild<QPushButton *>("startMirror");
+    QTRY_COMPARE(devices->count(), 2);
+    devices->setCurrentRow(1);
+    QVERIFY(!start->isEnabled());
+    QTest::qWait(4500);
+    QFile log(path);
+    QVERIFY(log.open(QIODevice::ReadOnly));
+    QCOMPARE(log.readAll().split('\n').size(), 2);
+    log.close();
+    refresh->click();
+    QTRY_COMPARE(devices->count(), 2);
+    QCOMPARE(devices->currentItem()->data(Qt::UserRole).toString(), QString("LOCKED"));
+    QVERIFY(!start->isEnabled());
+    QVERIFY(log.open(QIODevice::ReadOnly));
+    const auto data = log.readAll();
+    QCOMPARE(data.count("track-devices|-l"), 2);
+    for (const auto &line : data.split('\n'))
+      QVERIFY(!line.startsWith("devices|"));
+    log.close();
+    window.close();
+    QTRY_VERIFY(!window.isVisible());
+    QTest::qWait(1500);
+    QVERIFY(log.open(QIODevice::ReadOnly));
+    QCOMPARE(log.readAll(), data);
+  }
+  void workspaceEventFailureClearsActionsAndRecovers() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    qputenv("HUB_TEST_MODE", "monitor-disconnect");
+    Window window;
+    window.show();
+    auto *devices = window.findChild<QListWidget *>("devices");
+    auto *start = window.findChild<QPushButton *>("startMirror");
+    QTRY_VERIFY(start->isEnabled());
+    QTRY_COMPARE(devices->count(), 0);
+    QVERIFY(!start->isEnabled());
+    qunsetenv("HUB_TEST_MODE");
+    QTRY_COMPARE_WITH_TIMEOUT(devices->count(), 2, 4000);
+    QVERIFY(start->isEnabled());
+    QVERIFY(window.findChild<QLabel *>("notice")->text().contains("recovered"));
+    window.close();
+    QTRY_VERIFY(!window.isVisible());
+  }
+  void workspaceClosedBeforeDiscoveryDoesNotStartObserver() {
+    QSettings settings;
+    bundledPreferences().save(settings);
+    const auto path = storage.filePath("workspace-early-close.log");
+    qputenv("HUB_ENV_LOG", path.toUtf8());
+    Window window;
+    window.show();
+    window.close();
+    QTest::qWait(200);
+    QVERIFY(!window.isVisible());
+    QVERIFY(!QFile::exists(path));
+  }
   void parsesStructuredCameraCapabilitiesDefensively() {
     const auto cameras = parseCameraCapabilities(
         "noise before report\nList of cameras:\n"
@@ -1626,6 +1690,24 @@ private slots:
     qunsetenv("HUB_ENV_LOG");
     qunsetenv("ADB_SERVER_SOCKET");
   }
+  void otgDeviceInspectionUsesTheLocalForkOnly() {
+    Engine engine;
+    engine.preferences = bundledPreferences();
+    QSignalSpy changed(&engine, &Engine::otgDevicesChanged);
+    engine.inspectOtgDevices();
+    QTRY_VERIFY_WITH_TIMEOUT(!engine.inspectingOtg(), 3000);
+    QCOMPARE(engine.otgDevices.size(), 2);
+    QCOMPARE(engine.otgDevices.first().serial, QString("USB-OTG-123"));
+    QCOMPARE(engine.otgDevices.first().vendorProduct, QString("18d1:4ee7"));
+    QVERIFY(changed.size() >= 2);
+
+    const auto parsed = parseOtgDevices(QStringLiteral(
+        "noise\nDROIDCAST_USB/1 GOOD\t1234:5678\tMaker\tPhone\n"
+        "DROIDCAST_USB/1 \t1234:5678\tMissing\tSerial\n"
+        "DROIDCAST_USB/1 BAD\tnot-a-id\tMaker\tPhone\n"));
+    QCOMPARE(parsed.size(), 1);
+    QCOMPARE(parsed.first().serial, QString("GOOD"));
+  }
   void otgPreferencesPersistWithoutAllowingAnEmptyInputSet() {
     QSettings settings(storage.filePath("otg.ini"), QSettings::IniFormat);
     Preferences prefs = bundledPreferences();
@@ -2503,6 +2585,12 @@ private slots:
   void connectionRouteWorkspaceValidatesAppliesAndFits() {
     QSettings settings;
     bundledPreferences().save(settings);
+    const auto eventLogPath = storage.filePath("workspace-route-events.log");
+    qputenv("HUB_ENV_LOG", eventLogPath.toUtf8());
+    auto eventLog = [&] {
+      QFile file(eventLogPath);
+      return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray{};
+    };
     Window window;
     window.resize(920, 680);
     window.show();
@@ -2517,6 +2605,7 @@ private slots:
     auto *apply = window.findChild<QPushButton *>("applyConnectionRoute");
     QVERIFY(mode && server && transport && host && port && summary && help &&
             apply);
+    QTRY_COMPARE(window.findChild<QListWidget *>("devices")->count(), 2);
     QTRY_VERIFY_WITH_TIMEOUT(mode->isEnabled(), 3000);
     QCOMPARE(mode->currentData().toBool(), false);
     QVERIFY(summary->text().contains("local ADB"));
@@ -2539,6 +2628,7 @@ private slots:
     port->setValue(27183);
     QVERIFY(apply->isEnabled());
     apply->click();
+    QTRY_VERIFY(eventLog().contains("track-devices|-l\ttcp:adb.example:5037"));
     QTRY_VERIFY_WITH_TIMEOUT(mode->isEnabled(), 3000);
     settings.sync();
     QVERIFY(settings.value("connection/remote-adb").toBool());
@@ -2559,6 +2649,7 @@ private slots:
     mode->setCurrentIndex(mode->findData(false));
     QVERIFY(apply->isEnabled());
     apply->click();
+    QTRY_COMPARE(eventLog().count("track-devices|-l\t\n"), 2);
     QTRY_VERIFY_WITH_TIMEOUT(mode->isEnabled(), 3000);
     bundledPreferences().save(settings);
   }
@@ -2763,24 +2854,30 @@ private slots:
     auto *card = window.findChild<QWidget *>("otgControlCard");
     auto *topology = window.findChild<QWidget *>("otgTopology");
     auto *serial = window.findChild<QLineEdit *>("otgSerial");
+    auto *selector = window.findChild<QComboBox *>("otgDeviceSelector");
+    auto *refresh = window.findChild<QPushButton *>("refreshOtgDevices");
     auto *keyboard = window.findChild<QCheckBox *>("otgKeyboard");
     auto *mouse = window.findChild<QCheckBox *>("otgMouse");
     auto *gamepad = window.findChild<QCheckBox *>("otgGamepad");
     auto *start = window.findChild<QPushButton *>("startOtg");
     auto *stop = window.findChild<QPushButton *>("stopOtg");
     auto *status = window.findChild<QLabel *>("otgStatus");
-    QVERIFY(card && topology && serial && keyboard && mouse && gamepad &&
+    QVERIFY(card && topology && serial && selector && refresh && keyboard && mouse && gamepad &&
             start && stop && status);
     QVERIFY(card->isVisible());
     QVERIFY(topology->isVisible());
     QVERIFY(serial->placeholderText().contains("only eligible USB device"));
     QVERIFY(start->isEnabled());
     QVERIFY(!stop->isEnabled());
+    refresh->click();
+    QTRY_COMPARE_WITH_TIMEOUT(selector->count(), 3, 3000);
+    selector->setCurrentIndex(1);
+    QCOMPARE(serial->text(), QString("USB-OTG-123"));
     keyboard->setChecked(false);
     mouse->setChecked(false);
     QVERIFY(!start->isEnabled());
     gamepad->setChecked(true);
-    QVERIFY(start->isEnabled());
+    QTRY_VERIFY_WITH_TIMEOUT(start->isEnabled(), 3000);
     serial->setText("UI-USB-1");
     start->click();
     QTRY_COMPARE_WITH_TIMEOUT(status->text(), QString("Controlling over USB"),

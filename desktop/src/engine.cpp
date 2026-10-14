@@ -781,6 +781,23 @@ QList<Device> parseDevices(const QString &output) {
   return devices;
 }
 
+QList<OtgDevice> parseOtgDevices(const QString &output) {
+  QList<OtgDevice> devices;
+  constexpr auto prefix = "DROIDCAST_USB/1 ";
+  constexpr qsizetype prefixLength = sizeof("DROIDCAST_USB/1 ") - 1;
+  for (const auto &line : output.split('\n')) {
+    if (!line.startsWith(prefix))
+      continue;
+    const auto fields = line.mid(prefixLength).split('\t');
+    if (fields.size() != 4 || fields[0].isEmpty() || fields[0].size() > 256 ||
+        !fields[1].contains(
+            QRegularExpression("^[0-9a-fA-F]{4}:[0-9a-fA-F]{4}$")))
+      continue;
+    devices.append({fields[0], fields[1], fields[2], fields[3]});
+  }
+  return devices;
+}
+
 QList<CameraCapability> parseCameraCapabilities(const QString &output) {
   QList<CameraCapability> cameras;
   bool inCameraList = false, highSpeed = false;
@@ -1121,7 +1138,46 @@ Preferences bundledPreferences() {
 }
 
 Engine::Engine(QObject *parent) : QObject(parent) {
+  monitorRetry.setSingleShot(true);
+  monitorStartupTimeout.setSingleShot(true);
+  monitorStopTimeout.setSingleShot(true);
+  connect(&monitorRetry, &QTimer::timeout, this, &Engine::launchDeviceMonitor);
+  connect(&monitorStartupTimeout, &QTimer::timeout, this, [this] {
+    failDeviceMonitor("ADB device events did not initialize. Retrying the subscription.");
+  });
+  connect(&monitorStopTimeout, &QTimer::timeout, &deviceMonitor, &QProcess::kill);
+  connect(&deviceMonitor, &QProcess::stateChanged, this, [this] { emit deviceMonitoringChanged(); });
+  connect(&deviceMonitor, &QProcess::readyReadStandardOutput, this, &Engine::readDeviceMonitor);
+  connect(&deviceMonitor, &QProcess::readyReadStandardError, this, [this] {
+    emit log(QString::fromUtf8(deviceMonitor.readAllStandardError().left(8192)));
+  });
+  connect(&deviceMonitor, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+    if (error == QProcess::FailedToStart && monitorEnabled)
+      failDeviceMonitor("Could not start ADB device events. Check the bundled runtime.");
+  });
+  connect(&deviceMonitor, &QProcess::finished, this, [this] {
+    monitorStartupTimeout.stop(); monitorStopTimeout.stop();
+    if (!monitorEnabled) return;
+    if (monitorRestart) {
+      monitorRestart = false;
+      launchDeviceMonitor();
+    } else {
+      if (!monitorFailed) failDeviceMonitor("ADB device events disconnected. Retrying the subscription.");
+      else scheduleMonitorRetry();
+    }
+  });
+  connect(this, &Engine::sessionChanged, this, [this] {
+    if (!monitorEnabled) return;
+    if (otgSession()) {
+      if (deviceMonitorRunning() && !monitorRestart) restartDeviceMonitor();
+    } else if (!deviceMonitorRunning() && !monitorRetry.isActive()) {
+      launchDeviceMonitor();
+    } else if (monitorSocket != processEnvironment(false).value("ADB_SERVER_SOCKET")) {
+      restartDeviceMonitor();
+    }
+  });
   inspectionTimeout.setSingleShot(true);
+  otgInspectionTimeout.setSingleShot(true);
   inspector.setProcessChannelMode(QProcess::MergedChannels);
   connect(&inspectionTimeout, &QTimer::timeout, this, [this] {
     inspectionAborted = true;
@@ -1173,6 +1229,40 @@ Engine::Engine(QObject *parent) : QObject(parent) {
                                       : "Inspection failed. Reconnect or "
                                         "authorize the phone and retry.\n\n" +
                                             output);
+          });
+  usbInspector.setProcessChannelMode(QProcess::MergedChannels);
+  connect(&usbInspector, &QProcess::stateChanged, this,
+          [this] { emit otgDevicesChanged(); });
+  connect(&usbInspector, &QProcess::readyReadStandardOutput, this, [this] {
+    otgInspectionOutput += usbInspector.readAllStandardOutput();
+    if (otgInspectionOutput.size() > 128 * 1024)
+      usbInspector.kill();
+  });
+  connect(&otgInspectionTimeout, &QTimer::timeout, this,
+          [this] { usbInspector.kill(); });
+  connect(&usbInspector, &QProcess::finished, this,
+          [this](int code, QProcess::ExitStatus status) {
+            otgInspectionTimeout.stop();
+            otgInspectionOutput += usbInspector.readAllStandardOutput();
+            if (code == 0 && status == QProcess::NormalExit &&
+                otgInspectionOutput.size() <= 128 * 1024) {
+              otgDevices =
+                  parseOtgDevices(QString::fromUtf8(otgInspectionOutput));
+              emit message(otgDevices.isEmpty()
+                               ? "No accessible USB devices were found for USB control."
+                               : "Eligible USB devices were refreshed.");
+            } else {
+              otgDevices.clear();
+              emit message("Could not list USB devices. Check the cable and "
+                           "USB permissions.");
+            }
+            emit otgDevicesChanged();
+          });
+  connect(&usbInspector, &QProcess::errorOccurred, this,
+          [this](QProcess::ProcessError error) {
+            if (error == QProcess::FailedToStart)
+              emit message("Could not start the bundled USB device inspector. "
+                           "Reinstall DroidCast Desktop.");
           });
   bridgeCommandTimeout.setSingleShot(true);
   connect(&bridgeCommandTimeout, &QTimer::timeout, this, [this] {
@@ -1283,21 +1373,25 @@ Engine::Engine(QObject *parent) : QObject(parent) {
           [this](QProcess::ProcessError error) {
             if (error == QProcess::FailedToStart) {
               scanTimeout.stop();
+              if (monitorEnabled) return;
               devices.clear();
               emit devicesChanged();
               emit message("The bundled connection service could not start. "
                            "See Diagnostics or reinstall DroidCast Desktop.");
+              emit deviceScanCompleted(false);
             }
           });
   connect(&scan, &QProcess::finished, this,
           [this](int code, QProcess::ExitStatus status) {
             scanTimeout.stop();
             scanOutput += scan.readAllStandardOutput();
-            devices =
-                code == 0 && status == QProcess::NormalExit && !scanTimedOut
-                    ? parseDevices(QString::fromUtf8(scanOutput))
-                    : QList<Device>{};
+            if (monitorEnabled) return;
+            const bool success =
+                code == 0 && status == QProcess::NormalExit && !scanTimedOut;
+            devices = success ? parseDevices(QString::fromUtf8(scanOutput))
+                              : QList<Device>{};
             emit devicesChanged();
+            emit deviceScanCompleted(success);
             if (!scanTimedOut && (code != 0 || status != QProcess::NormalExit))
               emit message(
                   "ADB scan failed. Open Diagnostics for details, then retry.");
@@ -1560,7 +1654,9 @@ Engine::Engine(QObject *parent) : QObject(parent) {
 }
 
 Engine::~Engine() {
-  for (auto *process : {&scan, &wireless, &mirror, &deviceTask, &inspector}) {
+  stopDeviceMonitoring();
+  for (auto *process : {&scan, &wireless, &mirror, &deviceTask, &inspector,
+                        &usbInspector, &deviceMonitor}) {
     if (process->state() != QProcess::NotRunning) {
       if (process == &mirror)
         process->write("Q", 1);
@@ -1594,6 +1690,7 @@ void Engine::prepareAdbProcess(QProcess &process) const {
 }
 
 void Engine::refresh() {
+  if (monitorEnabled) { restartDeviceMonitor(); return; }
   if (scanning())
     return;
   if (otgSession()) {
@@ -1619,6 +1716,91 @@ void Engine::refresh() {
   scanTimeout.start(10000);
   prepareAdbProcess(scan);
   scan.start(preferences.adb, {"devices", "-l"});
+}
+
+void Engine::startDeviceMonitoring() {
+  if (monitorEnabled) return;
+  monitorEnabled = true;
+  monitorRetryDelay = 1000;
+  if (scanning()) { scanTimeout.stop(); scan.kill(); }
+  launchDeviceMonitor();
+}
+
+void Engine::stopDeviceMonitoring() {
+  monitorEnabled = false; monitorRestart = false; monitorHealthy = false;
+  monitorRecoveryPending = false;
+  monitorRetry.stop(); monitorStartupTimeout.stop(); monitorOutput.clear();
+  if (deviceMonitorRunning()) { deviceMonitor.terminate(); monitorStopTimeout.start(1500); }
+}
+
+void Engine::launchDeviceMonitor() {
+  if (!monitorEnabled || deviceMonitorRunning() || otgSession()) return;
+  monitorRetry.stop(); monitorOutput.clear();
+  monitorHealthy = monitorFailed = monitorRestart = false;
+  emit deviceMonitoringReset();
+  devices.clear(); emit devicesChanged();
+  const auto issue = connectionIssue(preferences);
+  if (!issue.isEmpty() || executablePath(preferences.adb).isEmpty()) {
+    failDeviceMonitor(issue.isEmpty() ? "The bundled ADB is missing. Device events are unavailable." : issue);
+    return;
+  }
+  const auto env = processEnvironment(false);
+  monitorSocket = env.value("ADB_SERVER_SOCKET");
+  deviceMonitor.setProcessEnvironment(env);
+  monitorStartupTimeout.start(10000);
+  monitorUptime.start();
+  // adb forwards the service's hex4-length framed stdout stream unchanged.
+  deviceMonitor.start(preferences.adb, {"track-devices", "-l"});
+}
+
+void Engine::restartDeviceMonitor() {
+  if (!monitorEnabled || monitorRestart) return;
+  monitorRetry.stop(); monitorStartupTimeout.stop(); monitorHealthy = false;
+  monitorRestart = true; monitorOutput.clear(); emit deviceMonitoringReset();
+  devices.clear(); emit devicesChanged();
+  if (deviceMonitorRunning()) { deviceMonitor.terminate(); monitorStopTimeout.start(1500); }
+  else { monitorRestart = false; launchDeviceMonitor(); }
+}
+
+void Engine::scheduleMonitorRetry() {
+  if (!monitorEnabled || otgSession() || monitorRetry.isActive()) return;
+  monitorRetry.start(monitorRetryDelay);
+  monitorRetryDelay = qMin(monitorRetryDelay * 2, 30000);
+}
+
+void Engine::failDeviceMonitor(const QString &reason) {
+  if (!monitorEnabled || monitorFailed) return;
+  if (monitorHealthy && monitorUptime.isValid() && monitorUptime.elapsed() >= 10000)
+    monitorRetryDelay = 1000;
+  monitorFailed = true; monitorHealthy = false; monitorStartupTimeout.stop(); monitorOutput.clear();
+  monitorRecoveryPending = true;
+  emit deviceMonitoringReset();
+  devices.clear(); emit devicesChanged(); emit deviceScanCompleted(false); emit message(reason);
+  if (deviceMonitorRunning()) deviceMonitor.kill();
+  else scheduleMonitorRetry();
+}
+
+void Engine::readDeviceMonitor() {
+  const auto output = deviceMonitor.readAllStandardOutput();
+  if (!monitorEnabled || monitorFailed || monitorRestart) return;
+  monitorOutput += output;
+  if (monitorOutput.size() > 256 * 1024) { failDeviceMonitor("ADB device event output exceeded its limit."); return; }
+  while (monitorOutput.size() >= 4) {
+    const auto prefix = monitorOutput.left(4);
+    for (char c : prefix)
+      if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
+        failDeviceMonitor("Invalid ADB device event framing."); return;
+      }
+    const auto length = prefix.toUInt(nullptr, 16);
+    if (monitorOutput.size() < static_cast<qsizetype>(4 + length)) return;
+    const auto payload = monitorOutput.mid(4, length);
+    monitorOutput.remove(0, 4 + length);
+    const bool recovered = !monitorHealthy && monitorRecoveryPending;
+    if (!monitorHealthy) { monitorHealthy = true; monitorStartupTimeout.stop(); }
+    devices = parseDevices(QString::fromUtf8(payload));
+    emit devicesChanged(); emit deviceScanCompleted(true);
+    if (recovered) { monitorRecoveryPending = false; emit message("Device discovery recovered."); }
+  }
 }
 
 void Engine::inspectDevice(const QString &serial) {
@@ -1651,6 +1833,24 @@ void Engine::cancelInspection() {
   emit inspectionResult(
       inspectionSerial,
       "Inspection canceled. You can retry or start mirroring.");
+}
+
+void Engine::inspectOtgDevices() {
+  if (running() || inspectingOtg()) {
+    emit message("Finish the active session or USB scan first.");
+    return;
+  }
+  if (executablePath(preferences.scrcpy).isEmpty()) {
+    emit message("DroidCast's bundled USB engine is missing. Reinstall the "
+                 "complete app package.");
+    return;
+  }
+  otgInspectionOutput.clear();
+  auto env = processEnvironment(true);
+  env.remove("DROIDCAST_SESSION_TOKEN");
+  usbInspector.setProcessEnvironment(env);
+  otgInspectionTimeout.start(10000);
+  usbInspector.start(preferences.scrcpy, {"--list-usb-devices"});
 }
 
 bool Engine::start(const QString &serial, const QString &recording) {
@@ -1800,9 +2000,9 @@ bool Engine::startOtg(const QString &serial, bool keyboard, bool mouse,
                       bool gamepad) {
   if (running())
     return false;
-  if (scanning() || wirelessBusy() || deviceBusy()) {
-    emit message("Wait for the current ADB operation to finish before starting "
-                 "USB control.");
+  if (scanning() || wirelessBusy() || deviceBusy() || inspectingOtg()) {
+    emit message("Wait for the current device or USB scan to finish before "
+                 "starting USB control.");
     return false;
   }
   const auto selectedSerial = serial.trimmed();

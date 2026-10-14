@@ -1,5 +1,35 @@
 # DroidCast Desktop: gap register
 
+Approved planning (2026-10-13): the compact interface and platform packaging
+are described in [the new spec](compact-desktop-spec.md) and
+[the reconciled ticket plan](compact-desktop-tickets-draft.md). The
+[local tracker](README.md) contains individual approved tickets. They cross-reference
+all existing tickets and retain hardware/release gaps. Plan approval does not mean
+the redesign or standalone packages have been implemented.
+
+USB arrival clarification: [N17](issues/14-oferta-usb.md) proposes an action offer
+only while DroidCast is running; [N18](issues/15-iniciar-com-sistema.md) adds optional
+user-session startup. “Transfer file” reuses explicit ADB transfer, not MTP browsing.
+N17 now uses a persistent ADB event subscription in the compact pilot; periodic
+discovery queries were removed. Tests cover framing/retry, baseline, queued arrivals,
+authorization, routing and target isolation. A five-second probe validated the actual
+ADB stream with no attached phone. Native notifications, plug latency and physical
+USB journeys remain unverified. N18 login remains planned. Exiting stops app monitoring.
+
+The original workspace now also uses the shared persistent ADB subscription instead
+of its four-second polling timer. Explicit refresh retains the selected serial when
+available; route changes restart the observer and closing waits for its exit. USB
+offers remain in the compact pilot. Hardware/platform event proof remains open.
+
+Compact pilot: the separate prototype now defaults to real display-session operations
+through the existing controller; `--demo` retains simulation. This is partial N02/N03
+work explicitly requested after visual review, not replacement of the main workspace.
+Fake-process tests passed. The user subsequently confirmed real mirroring worked
+on this macOS host. This does not prove recording/playback or transfer. The compact
+pilot now includes optional tray/background and shared renderer commands; native
+tray/SDL focus and other platforms remain pending. N17 is partial as described above;
+N18 is not implemented.
+
 This is the short operational view of the project. Read this file first when the
 implementation progress is hard to follow. The ticket draft keeps the complete
 acceptance criteria; this register says what is usable now and what must happen next.
@@ -31,7 +61,7 @@ It does **not** prove that a phone, camera, codec or operating-system package wo
 | Camera | Partial | Source, ID/facing, guided declared size/FPS/high-speed choices, manual fallback, startup torch/zoom and live torch/zoom. | Android-version/capability gates and real camera tests. |
 | Recording | Partial | Mode-specific MKV/MP4/MKA/M4A/OPUS/AAC/FLAC/WAV, codec validation, migration, unique paths, filters and graceful finalization state. | Playback verification of real files after normal and abnormal endings. |
 | Embedded video | Open decision | The engine opens a separate native mirror window. | Decide release scope; prototype a real frame inside Qt before promising it. |
-| OTG | Partial | A dedicated ADB-independent control-only session launches keyboard/mouse/gamepad AOA, waits for native USB readiness, stops cleanly and hides media/ADB tools. Automatic single-device selection and an optional USB serial handle current selection. | Enumerate eligible libusb devices in the UI, improve multiple-device recovery, and complete Linux/Windows hardware/driver tests. |
+| OTG | Partial | A dedicated ADB-independent control-only session launches keyboard/mouse/gamepad AOA, waits for native USB readiness, stops cleanly and hides media/ADB tools. A fork-owned libusb picker lists accessible eligible USB devices; manual and automatic single-device selection remain available. | Improve multiple-device recovery, and complete Linux/Windows hardware/driver tests. |
 | Remote tunnels | Partial | Local/remote ADB route, forced-forward tunnel options, persistence and one transport snapshot across every ADB/scrcpy child are covered by automated tests. | Real remote ADB and SSH tunnel journeys, unreachable-host recovery review and Windows/macOS proof. |
 | Linux virtual webcam | Blocked | Upstream feature is known. | Enable V4L2 in the build, detect an existing device, configure it and consume real frames. |
 | Distribution | Open | Development staging works on Linux. | Reproducible Linux/Windows/macOS artifacts, notices, Qt deployment, signing and clean-machine QA. |
@@ -95,9 +125,9 @@ event, and reuses graceful stop/disconnect recovery. Mirror, recording, screensh
 application and ADB controls are hidden for the active OTG session. Automated process,
 persistence, bridge, UI and minimum-size coverage exists.
 
-The remaining product gap is discoverability when several eligible USB devices are
-present. Add a fork-owned libusb enumeration command and a separate picker; never copy
-or infer this list from ADB. Then test with USB debugging disabled on real Linux and
+Fork-owned libusb enumeration and a separate picker now exist in the local changes
+(implementation Part 26); they do not infer candidates from ADB. The remaining product
+gap is multiple-device selection/recovery and hardware proof. Test with USB debugging disabled on real Linux and
 Windows hardware, including udev access denial, WinUSB driver failure, unplug and
 reconnect, before promoting ticket 22 from Partial to Implemented.
 
